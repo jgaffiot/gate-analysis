@@ -1,0 +1,65 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # General hygiene
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      # Security
+      - id: detect-private-key
+      # - id: detect-aws-credentials
+      # Python-specific
+      - id: check-ast
+      - id: check-docstring-first
+      - id: debug-statements
+      # - id: check-builtin-literals  # enforces e.g. list() → []; may conflict with style choices
+      # Serialisation formats present in this repo
+      - id: check-toml
+      - id: check-yaml
+      # - id: check-json             # no JSON files currently
+      # - id: check-xml              # no XML files currently
+      # - id: pretty-format-json     # no JSON files currently
+      # Symlinks / executables (not relevant for a pure-Python library)
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      # Workflow helpers (enable if needed)
+#      - id: no-commit-to-branch    # prevent direct commits to main/master
+      - id: fix-byte-order-marker
+      - id: check-vcs-permalinks
+      - id: forbid-new-submodules
+      - id: forbid-submodules
+      # Not applicable to uv-managed projects
+      # - id: requirements-txt-fixer
+      # - id: file-contents-sorter
+      # - id: sort-simple-yaml
+      # Conflicts with ruff's quote normalisation
+      # - id: double-quote-string-fixer
+      # Requires test naming convention to be decided first
+      # - id: name-tests-test
+
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff (format)
+        language: system
+        entry: uv run ruff format
+        types: [python]
+      - id: ruff-check
+        name: ruff (lint)
+        language: system
+        entry: uv run ruff check
+        args: [--fix]
+        types: [python]
+      - id: ty
+        name: ty (type check)
+        language: system
+        entry: uv run ty check
+        args: [src/]
+        types: [python]
+        pass_filenames: false
