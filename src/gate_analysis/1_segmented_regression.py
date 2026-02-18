@@ -92,7 +92,7 @@ def _build_segments(
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
+    from bokeh.io import show
 
     data = generate_synthetic_data()
     result = segmented_regression(data.time, data.position)
@@ -104,4 +104,4 @@ if __name__ == "__main__":
         detected_breakpoints=result["breakpoints"],
         estimated_slopes=result["slopes"],
     )
-    plt.show()
+    show(fig)

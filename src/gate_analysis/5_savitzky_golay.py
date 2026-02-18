@@ -126,49 +126,55 @@ def _build_segments(
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
+    from bokeh.io import show
+    from bokeh.layouts import column
+    from bokeh.models import Label, Span
+    from bokeh.plotting import figure
 
     data = generate_synthetic_data()
     result = savitzky_golay(data.time, data.position)
-    segments = _build_segments(data, result)
-
-    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
     # Top: signal + smoothed
-    axes[0].plot(data.time, data.position, ".", color="gray", alpha=0.3, markersize=2)
-    axes[0].plot(
-        data.time, result["smoothed"], "b-", linewidth=1.5, label="SG smoothed"
+    p1 = figure(
+        width=1200,
+        height=400,
+        title="Option E: Savitzky-Golay Derivative + Threshold",
+        y_axis_label="Gate position (%)",
+    )
+    p1.scatter(data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2)
+    p1.line(
+        data.time, result["smoothed"], line_color="blue", line_width=1.5, legend_label="SG smoothed"
     )
     for bp in result["breakpoints"]:
-        axes[0].axvline(bp, color="red", linestyle="--", alpha=0.7)
+        p1.add_layout(Span(location=bp, dimension="height", line_color="red", line_dash="dashed", line_alpha=0.7))
     for bp in data.breakpoints:
-        axes[0].axvline(bp, color="green", linestyle=":", alpha=0.4)
-    axes[0].set_ylabel("Gate position (%)")
-    axes[0].set_title("Option E: Savitzky-Golay Derivative + Threshold")
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+        p1.add_layout(Span(location=bp, dimension="height", line_color="green", line_dash="dotted", line_alpha=0.4))
+    p1.legend.location = "top_right"
+    p1.grid.grid_line_alpha = 0.3
 
-    # Bottom: derivative
-    axes[1].plot(data.time, result["derivative"], "b-", linewidth=1)
-    axes[1].axhline(0, color="black", linewidth=0.5)
+    # Bottom: derivative (shares x range with top)
+    p2 = figure(
+        width=1200,
+        height=400,
+        title="First derivative (instantaneous slope)",
+        x_axis_label="Time (s)",
+        y_axis_label="Derivative (%/s)",
+        x_range=p1.x_range,
+    )
+    p2.line(data.time, result["derivative"], line_color="blue", line_width=1)
+    p2.add_layout(Span(location=0, dimension="width", line_color="black", line_width=0.5))
     for bp in result["breakpoints"]:
-        axes[1].axvline(bp, color="red", linestyle="--", alpha=0.7)
-    axes[1].set_xlabel("Time (s)")
-    axes[1].set_ylabel("Derivative (%/s)")
-    axes[1].set_title("First derivative (instantaneous slope)")
-    axes[1].grid(True, alpha=0.3)
+        p2.add_layout(Span(location=bp, dimension="height", line_color="red", line_dash="dashed", line_alpha=0.7))
+    p2.grid.grid_line_alpha = 0.3
 
     info = f"Fast slope: {result['slopes'][0]:.2f} %/s\nSlow slope: {result['slopes'][1]:.2f} %/s"
     info += f"\nTrue: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s"
-    axes[1].text(
-        0.02,
-        0.02,
-        info,
-        transform=axes[1].transAxes,
-        fontsize=9,
-        verticalalignment="bottom",
-        bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.8},
+    p2.add_layout(
+        Label(
+            x=10, y=10, x_units="screen", y_units="screen",
+            text=info, text_font_size="9pt",
+            background_fill_color="wheat", background_fill_alpha=0.8,
+        )
     )
 
-    plt.tight_layout()
-    plt.show()
+    show(column(p1, p2))

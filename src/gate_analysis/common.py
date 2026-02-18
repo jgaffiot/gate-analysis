@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+from bokeh.models import Label, Span
+from bokeh.palettes import Category10
+from bokeh.plotting import figure
 
 
 @dataclass
@@ -90,33 +92,69 @@ def plot_results(
     | None = None,
     detected_breakpoints: list[float] | None = None,
     estimated_slopes: list[float] | None = None,
-) -> plt.Figure:
+) -> figure:
     """Plot the raw data with optional fitted segments and detected breakpoints."""
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    ax.plot(
-        data.time,
-        data.position,
-        ".",
-        color="gray",
-        alpha=0.3,
-        markersize=2,
-        label="Raw data",
+    fig = figure(
+        width=1200,
+        height=600,
+        title=title,
+        x_axis_label="Time (s)",
+        y_axis_label="Gate position (%)",
     )
 
+    fig.scatter(
+        data.time,
+        data.position,
+        marker="circle",
+        color="gray",
+        alpha=0.3,
+        size=2,
+        legend_label="Raw data",
+    )
+
+    colors = Category10[10]
     if fitted_segments:
         for i, (t_seg, y_seg) in enumerate(fitted_segments):
-            ax.plot(t_seg, y_seg, linewidth=2, label=f"Segment {i}")
+            fig.line(
+                t_seg,
+                y_seg,
+                line_width=2,
+                color=colors[i % 10],
+                legend_label=f"Segment {i}",
+            )
 
     if detected_breakpoints:
         for bp in detected_breakpoints:
-            ax.axvline(
-                bp, color="red", linestyle="--", alpha=0.7, label=f"BP @ {bp:.2f}s"
+            fig.add_layout(
+                Span(
+                    location=bp,
+                    dimension="height",
+                    line_color="red",
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
+            # Invisible glyph to register a legend entry for this breakpoint
+            fig.line(
+                [],
+                [],
+                line_color="red",
+                line_dash="dashed",
+                line_alpha=0.7,
+                legend_label=f"BP @ {bp:.2f}s",
             )
 
-    # Ground truth breakpoints
+    # Ground truth breakpoints (no legend entry)
     for bp in data.breakpoints:
-        ax.axvline(bp, color="green", linestyle=":", alpha=0.4)
+        fig.add_layout(
+            Span(
+                location=bp,
+                dimension="height",
+                line_color="green",
+                line_dash="dotted",
+                line_alpha=0.4,
+            )
+        )
 
     info_parts = []
     if estimated_slopes:
@@ -124,29 +162,32 @@ def plot_results(
             info_parts.append(f"Slope {i + 1}: {s:.2f} %/s")
     info_parts.append(f"True slopes: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s")
 
-    ax.text(
-        0.02,
-        0.02,
-        "\n".join(info_parts),
-        transform=ax.transAxes,
-        verticalalignment="bottom",
-        fontsize=9,
-        bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.8},
+    fig.add_layout(
+        Label(
+            x=10,
+            y=10,
+            x_units="screen",
+            y_units="screen",
+            text="\n".join(info_parts),
+            text_font_size="9pt",
+            background_fill_color="wheat",
+            background_fill_alpha=0.8,
+        )
     )
 
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Gate position (%)")
-    ax.set_title(title)
-    ax.legend(loc="upper right", fontsize=8)
-    ax.grid(True, alpha=0.3)
+    fig.legend.location = "top_right"
+    fig.legend.label_text_font_size = "8pt"
+    fig.grid.grid_line_alpha = 0.3
 
     return fig
 
 
 if __name__ == "__main__":
+    from bokeh.io import show
+
     data = generate_synthetic_data()
     print(f"Generated {len(data.time)} samples")
     print(f"True breakpoints: {data.breakpoints}")
     print(f"True slopes: {data.slopes}")
     fig = plot_results(data, "Synthetic Gate Closing Data")
-    plt.show()
+    show(fig)
