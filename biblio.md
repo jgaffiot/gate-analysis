@@ -462,7 +462,234 @@ To monitor aging (slope flattening across many closing events):
 
 ---
 
-## 9. Practical Recommendation
+## 9. Transformer-Based Methods
+
+Modern deep-learning time-series research is dominated by Transformer
+architectures. This section surveys pre-trained foundation models (usable
+zero-shot or with light fine-tuning) and untrained architectures (requiring
+training from scratch), and assesses their practical relevance to the
+gate-closing problem.
+
+**Critical caveat:** the vast majority of time-series Transformer foundation
+models are **forecasting models** — they output a probability distribution
+over future values. Change-point detection and slope estimation are
+fundamentally different tasks. Applicability must be evaluated carefully for
+each model.
+
+---
+
+### 9.1 Pre-trained Foundation Models
+
+#### 9.1.1 MOMENT — the only broadly applicable foundation model
+
+- **HuggingFace:** `AutonLab/MOMENT-1-large` (also `-base`, `-small`)
+- **Paper:** Goswami, M., et al. (2024). "MOMENT: A Family of Open
+  Time-series Foundation Models." *ICML 2024*.
+  [arXiv:2402.03885](https://arxiv.org/abs/2402.03885)
+- **Package:** `pip install momentfm`
+- **Architecture:** ViT-style patch Transformer encoder pre-trained on the
+  "Time Series Pile" (large diverse collection of public time series) via a
+  masked patch reconstruction objective.
+- **Supported tasks:** forecasting, classification, anomaly detection
+  (reconstruction-based), imputation. The only foundation model with
+  explicit non-forecasting task support.
+- **Applicability to this problem:**
+  - *Reconstruction / anomaly mode (zero-shot):* MOMENT computes a
+    per-timestep reconstruction error. Phase transitions (change points) are
+    locally novel patterns and appear as peaks in this error — they can be
+    thresholded or peak-detected to locate breakpoints. No training needed.
+  - *Classification mode (light fine-tuning):* add a lightweight
+    classification head on top of frozen MOMENT patch embeddings and train
+    it to label each patch as one of four regimes (plateau-high, fast-ramp,
+    slow-ramp, plateau-low). Breakpoints are then the boundaries between
+    predicted classes. Training data can be generated synthetically in
+    unlimited quantity.
+
+  ```python
+  from momentfm import MOMENTPipeline
+  import torch
+
+  pipe = MOMENTPipeline.from_pretrained(
+      "AutonLab/MOMENT-1-large",
+      model_kwargs={"task_name": "reconstruction"},
+  )
+  pipe.init()
+  # Input shape: (batch, n_channels, seq_len); MOMENT expects ≤512 samples
+  x = torch.tensor(position).float().unsqueeze(0).unsqueeze(0)
+  out = pipe(x)
+  recon_error = (x - out.reconstruction).abs().squeeze()
+  # peaks in recon_error ≈ change-point locations
+  ```
+
+- **Limitations:** fixed 512-token context window; reconstruction-based
+  anomaly detection is designed for point anomalies, not structural breaks —
+  post-processing is needed; fine-tuning requires labelled regime examples
+  (synthetic generation solves this).
+
+#### 9.1.2 Forecasting-only models — not directly applicable
+
+The following models are included for completeness. All are pre-trained
+probabilistic forecasters; none produce segmentation or change-point outputs
+natively. They could in principle detect change points indirectly via
+likelihood-ratio tests (high forecast error at transitions), but this is
+fragile and roundabout compared to the methods in sections 3–4.
+
+| Model | Organisation | HuggingFace ID | Notes |
+|-------|-------------|----------------|-------|
+| Chronos-Bolt | Amazon | `amazon/chronos-bolt-base` | Tokenises values, cross-entropy loss; no segmentation output. [arXiv:2403.07815](https://arxiv.org/abs/2403.07815) |
+| Moirai | Salesforce | `Salesforce/moirai-1.1-R-large` | Patch encoder, probabilistic forecasting; Moirai-MoE variant uses sparse MoE. |
+| TimesFM | Google | `google/timesfm-1.0-200m` | Forecasting only. |
+| TimeGPT | Nixtla | API (closed weights) | Forecasting + residual anomaly detection; API-only, not open weights. |
+
+---
+
+### 9.2 Untrained Architectures (Require Training)
+
+The gate-closing problem is unusually well-suited to training from scratch:
+`generate_synthetic_data()` provides an unlimited supply of perfectly
+labelled synthetic examples at negligible cost. All architectures below
+would be trained on such data.
+
+#### 9.2.1 PatchTST — patch Transformer for classification (available in `transformers`)
+
+- **HuggingFace:** integrated in `transformers` as
+  `PatchTSTForClassification` / `PatchTSTForPrediction`.
+  [Model doc](https://huggingface.co/docs/transformers/en/model_doc/patchtst)
+- **Paper:** Nie, Y., et al. (2023). "A Time Series is Worth 64 Words:
+  Long-term Forecasting with Transformers." *ICLR 2023*.
+  [arXiv:2211.14730](https://arxiv.org/abs/2211.14730)
+- **Architecture:** divides the signal into fixed-length patches (tokens)
+  and applies a channel-independent Transformer encoder. `PatchTSTFor
+  Classification` adds a classification head over the patch embeddings.
+- **Approach for this problem:** frame it as per-timestep regime labelling
+  (4 classes). Breakpoints are read off as class-label boundaries.
+
+  ```python
+  from transformers import PatchTSTConfig, PatchTSTForClassification
+
+  config = PatchTSTConfig(
+      num_input_channels=1,
+      context_length=1200,
+      patch_length=16,        # 75 tokens for n=1200
+      num_targets=4,          # 4 regimes
+      d_model=64,
+      num_attention_heads=4,
+      num_hidden_layers=3,
+  )
+  model = PatchTSTForClassification(config)
+  # Train on synthetic data: 10 000–100 000 examples, minutes on CPU
+  ```
+
+- **Advantage:** in the standard HuggingFace ecosystem; self-supervised
+  pre-training (masked patch reconstruction) also supported, enabling
+  pre-training on unlabelled closing curves before supervised fine-tuning.
+
+#### 9.2.2 Anomaly Transformer — anomaly-attention mechanism
+
+- **GitHub:** [thuml/Anomaly-Transformer](https://github.com/thuml/Anomaly-Transformer)
+- **Paper:** Xu, J., et al. (2022). "Anomaly Transformer: Time Series
+  Anomaly Detection with Association Discrepancy." *ICLR 2022 Spotlight*.
+- **Architecture:** introduces an "Anomaly Attention" block that computes an
+  *association discrepancy* between point-wise and patch-wise attention
+  distributions. Normal segments have high discrepancy; anomalies (and by
+  extension, structural breaks) disrupt this pattern.
+- **Limitation for this problem:** designed for point anomalies in
+  multivariate industrial signals, not for piecewise-linear structural
+  breaks in a univariate signal. Would require significant adaptation and
+  domain-specific training. Likely overkill.
+
+#### 9.2.3 TCDformer — Transformer with explicit change-point preprocessing
+
+- **Paper:** Wan, R., et al. (2024). "TCDformer: A Transformer Framework
+  for Non-stationary Time Series Forecasting Based on Trend and
+  Change-Point Detection." *Neural Networks*, 173, 106196.
+  [doi:10.1016/j.neunet.2024.106196](https://www.sciencedirect.com/science/article/abs/pii/S0893608024001205)
+- **Architecture:** introduces a Local Linear Scaling Approximation (LLSA)
+  module that explicitly detects change points as a preprocessing step,
+  then feeds the reconstructed signal into a Transformer forecaster using
+  wavelet attention for seasonal components and an MLP for trend.
+- **Relevance:** the LLSA front-end is directly relevant — it is a learnable
+  change-point detector that could be extracted and used standalone. The
+  full TCDformer is forecasting-oriented and not applicable as-is.
+
+#### 9.2.4 Custom Transformer with segmentation head (most principled approach)
+
+For a task with perfectly known structure and unlimited synthetic training
+data, a small purpose-built Transformer is arguably the cleanest option:
+
+- **Input:** signal split into patches of length *p* (e.g., *p*=16 → 75
+  tokens for *n*=1200)
+- **Encoder:** standard Transformer (4 layers, 8 heads, d_model=64, ~500k
+  parameters)
+- **Head A:** per-token regime classifier (4 classes); breakpoints are
+  class-label boundaries
+- **Head B (optional):** per-segment slope regressor fitted after
+  classification
+- **Constraint (optional):** enforce the known regime ordering (0→1→2→3)
+  via a CRF layer or a Viterbi decoding step over the classifier output
+- **Training:** fully synthetic via `generate_synthetic_data()` with
+  randomised noise levels, slopes, and breakpoint positions — infinite
+  supply, no annotation cost
+- **Training time:** minutes on CPU for a reasonably sized synthetic dataset
+
+---
+
+### 9.3 Comparison Table
+
+| Model | Type | HuggingFace / Source | Applicable? | Effort |
+|-------|------|----------------------|-------------|--------|
+| MOMENT | Pre-trained encoder | [`AutonLab/MOMENT-1-large`](https://huggingface.co/AutonLab/MOMENT-1-large) | ✓ Anomaly/classification | Light fine-tuning or zero-shot |
+| PatchTST | Untrained (HF arch) | [`transformers.PatchTST`](https://huggingface.co/docs/transformers/en/model_doc/patchtst) | ✓ Per-patch classification | Train on synthetic data |
+| Custom Transformer | Untrained | PyTorch standard | ✓ Best structural fit | Train on synthetic data |
+| TCDformer LLSA | Untrained (front-end) | [Neural Networks 2024](https://www.sciencedirect.com/science/article/abs/pii/S0893608024001205) | ~ LLSA front-end only | Adapt + train |
+| Anomaly Transformer | Untrained | [`thuml/Anomaly-Transformer`](https://github.com/thuml/Anomaly-Transformer) | ~ Indirect, needs adapting | Adapt + train |
+| Chronos-Bolt | Pre-trained forecaster | [`amazon/chronos-bolt-base`](https://huggingface.co/amazon/chronos-bolt-base) | ✗ Forecasting only | N/A |
+| Moirai | Pre-trained forecaster | `Salesforce/moirai-1.1-R-large` | ✗ Forecasting only | N/A |
+| TimesFM | Pre-trained forecaster | `google/timesfm-1.0-200m` | ✗ Forecasting only | N/A |
+| TimeGPT | Pre-trained forecaster | API (closed weights) | ✗ Forecasting + API only | N/A |
+
+### 9.4 Practical Recommendation
+
+Start with **MOMENT in reconstruction mode** (zero-shot, ~5 lines of code)
+to get a quick baseline: reconstruction-error peaks can be compared directly
+against the breakpoints found by the classical methods in sections 3–4.
+
+If accuracy is insufficient, train a **PatchTST classifier** on synthetic
+data generated by `generate_synthetic_data()`. The per-patch classification
+framing maps cleanly to the four-regime structure, the architecture is
+available off-the-shelf from `transformers`, and the unlimited synthetic
+supply makes annotation cost zero.
+
+A **custom Transformer with a constrained segmentation head** (ordered-regime
+CRF decoding) would be the most principled design if the goal is production
+deployment with strict accuracy requirements.
+
+---
+
+### 9.5 Key References
+
+18. Goswami, M., Szafer, K., Choudhry, A., Cai, Y., Li, S., Dubrawski, A.
+    (2024). "MOMENT: A Family of Open Time-series Foundation Models."
+    *ICML 2024*. [arXiv:2402.03885](https://arxiv.org/abs/2402.03885)
+19. Nie, Y., Nguyen, N.H., Sinthong, P., Kalagnanam, J. (2023). "A Time
+    Series is Worth 64 Words: Long-term Forecasting with Transformers."
+    *ICLR 2023*. [arXiv:2211.14730](https://arxiv.org/abs/2211.14730)
+20. Xu, J., Wu, H., Wang, J., Long, M. (2022). "Anomaly Transformer: Time
+    Series Anomaly Detection with Association Discrepancy." *ICLR 2022
+    Spotlight*. [openreview](https://openreview.net/forum?id=LzQQ89U1qm_)
+21. Wan, R., Xia, Y., et al. (2024). "TCDformer: A Transformer Framework
+    for Non-stationary Time Series Forecasting Based on Trend and
+    Change-Point Detection." *Neural Networks*, 173, 106196.
+    [doi:10.1016/j.neunet.2024.106196](https://www.sciencedirect.com/science/article/abs/pii/S0893608024001205)
+22. Ansari, A.F., et al. (2024). "Chronos: Learning the Language of Time
+    Series." [arXiv:2403.07815](https://arxiv.org/abs/2403.07815)
+23. Woo, G., et al. (2024). "Unified Training of Universal Time Series
+    Forecasting Transformers (Moirai)."
+    [Salesforce blog](https://www.salesforce.com/blog/moirai/)
+
+---
+
+## 10. Practical Recommendation
 
 For a first pass, start with **Option A** (`segmented` in R or
 `piecewise-regression` in Python). It is the simplest method that directly
