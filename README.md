@@ -143,11 +143,46 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 
 ## Usage
 
+### Individual scripts
+
 ```bash
+# Install dependencies
 uv sync
+
+# Run headlessly (no display required, e.g. on a server)
 MPLBACKEND=Agg uv run python -m gate_analysis.1_segmented_regression
-# or interactively (with plot display):
+
+# Run interactively (opens a browser window with the plot)
 uv run python -m gate_analysis.1_segmented_regression
 ```
 
 Replace `1_segmented_regression` with any of the 7 module names above.
+
+### Notebook (`notebook.py`)
+
+The notebook is written with [marimo](https://marimo.io) and covers all seven
+methods on a single page.
+
+**Open as an interactive notebook** (live reactive UI in the browser):
+
+```bash
+uv run marimo edit notebook.py
+```
+
+**Run as a read-only app** (no editing, cleaner UI):
+
+```bash
+uv run marimo run notebook.py
+```
+
+**Export to a self-contained HTML file** (no server needed, shareable):
+
+```bash
+uv run marimo export html notebook.py -o notebook.html
+```
+
+**Run as a plain Python script** (prints results to stdout, no browser):
+
+```bash
+uv run python notebook.py
+```
