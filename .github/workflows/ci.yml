@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ── Code quality ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --frozen --group dev
+      - run: uv run ruff format --check src/
+      - run: uv run ruff check src/
+
+  type-check:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --frozen --group dev
+      - run: uv run ty check src/
+
+  # ── Smoke tests ─────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke test (all methods + notebook)
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --frozen
+
+      - name: Method 1 — Segmented regression
+        run: uv run python -m gate_analysis.1_segmented_regression
+
+      - name: Method 2 — Bayesian changepoint
+        run: uv run python -m gate_analysis.2_bayesian_changepoint
+
+      - name: Method 3 — CPOP piecewise linear
+        run: uv run python -m gate_analysis.3_cpop_piecewise_linear
+
+      - name: Method 4 — ruptures + OLS
+        run: uv run python -m gate_analysis.4_ruptures_ols
+
+      - name: Method 5 — Savitzky-Golay
+        run: uv run python -m gate_analysis.5_savitzky_golay
+
+      - name: Method 6 — Kalman filter
+        run: uv run python -m gate_analysis.6_kalman_filter
+
+      - name: Method 8 — NOT detection
+        run: uv run python -m gate_analysis.8_not_detection
+
+      - name: Notebook export
+        run: uv run marimo export html notebook.py -o /tmp/notebook.html
