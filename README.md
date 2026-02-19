@@ -2,7 +2,7 @@
 
 ## Goal
 
-This project demonstrates six different methods for analyzing **pipe gate
+This project demonstrates seven different methods for analyzing **pipe gate
 closing curves**. The signal of interest is a gate position (in %) recorded
 over time, with the following structure:
 
@@ -86,6 +86,19 @@ threshold/split heuristic as option 5. Provides online-capable processing,
 but the heuristic regime splitting limits accuracy compared to model-based
 approaches.
 
+### 8. NOT — Narrowest-Over-Threshold (`8_not_detection.py`)
+
+**Library:** custom implementation (numpy + scipy only)
+
+Python reimplementation of the NOT algorithm (Baranowski, Chen & Fryzlewicz,
+2019). Draws a large number of random sub-intervals, computes an F-type
+contrast statistic (RSS reduction from splitting at a kink) at every
+candidate position using O(1) prefix-sum OLS, and iteratively declares the
+narrowest interval whose maximum statistic exceeds a Bonferroni-calibrated
+threshold as a change point. The narrowest-first extraction rule gives sharper
+localisation of closely-spaced breakpoints than standard binary segmentation.
+No need to specify the number of breakpoints.
+
 ## Results
 
 All demos are run on the same synthetic signal (1200 samples, dt=0.01s,
@@ -100,6 +113,7 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 | 4 | ruptures + OLS | 2.850, 4.300, 6.900 | -25.18 | -8.64 | ~1 s |
 | 5 | Savitzky-Golay | 0.390, 5.000, 11.990 | -22.67 | -3.41 | ~1 s |
 | 6 | Kalman filter | 0.040, 8.010, 11.800 | -11.91 | -4.78 | ~1 s |
+| 8 | NOT | 2.030, 5.040, 9.100 | -24.99 | -5.05 | ~1 s |
 | | **Ground truth** | **2.000, 5.000, 9.000** | **-25.00** | **-5.00** | |
 
 ### Observations
@@ -119,6 +133,11 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 - **Option 2** (Bayesian) is the only one providing principled credible
   intervals (e.g., fast slope 95% CI: [-25.39, -24.98] %/s), but is
   ~150x slower than option 1.
+- **Option 8** (NOT) achieves accuracy on par with options 1–3 while
+  requiring no prior knowledge of the number of breakpoints. The
+  narrowest-first rule makes it robust when change points are closely spaced.
+  The Bonferroni-calibrated threshold provides statistical control over false
+  positives.
 - For batch processing many closing events, **option 1** (segmented
   regression) offers the best accuracy/speed trade-off.
 
@@ -131,4 +150,4 @@ MPLBACKEND=Agg uv run python -m gate_analysis.1_segmented_regression
 uv run python -m gate_analysis.1_segmented_regression
 ```
 
-Replace `1_segmented_regression` with any of the 6 module names above.
+Replace `1_segmented_regression` with any of the 7 module names above.

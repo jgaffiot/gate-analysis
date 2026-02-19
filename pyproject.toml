@@ -15,6 +15,7 @@ dependencies = [
     "pymc",
     "ruptures",
     "filterpy",
+    "marimo>=0.19.11",
 ]
 
 [dependency-groups]

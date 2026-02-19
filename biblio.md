@@ -182,6 +182,67 @@ its phases (plateaus and linear ramps).
 - **Drawback**: does not natively model linear trends within states (would
   need autoregressive HMM or switching linear dynamical system).
 
+### 3.8 L1 Trend Filtering (Total Variation Denoising for Piecewise-Linear Signals)
+
+- Solves a convex optimisation problem with an L1 penalty on the second
+  differences of the signal. The solution is guaranteed to be piecewise
+  linear with automatically selected knot locations.
+- Reference: Kim, S., Koh, K., Boyd, S., Gorinevsky, D. (2009). "ℓ1 Trend
+  Filtering." *SIAM Review*, 51(2), 339-360.
+- Extended to adaptive piecewise polynomials of arbitrary degree by:
+  Tibshirani, R.J. (2014). "Adaptive piecewise polynomial estimation via
+  trend filtering." *Annals of Statistics*, 42(1), 285-323.
+- **Python**: `cvxpy` (general convex solver). **R**: `genlasso`.
+- No need to specify the number of breakpoints; the penalty parameter λ
+  controls complexity (larger λ → fewer segments). Can be tuned via
+  cross-validation or BIC.
+- Breakpoint locations are implicit (found as kinks in the fitted piecewise-
+  linear solution); slopes are read off per segment after fitting.
+- **Well suited** for this application: directly targets piecewise-linear
+  signals, convex problem (global optimum guaranteed), handles noise well.
+- **Drawback**: does not provide formal confidence intervals on breakpoints
+  or slopes without post-hoc bootstrap.
+
+### 3.9 Narrowest-Over-Threshold (NOT)
+
+- Searches for the narrowest data interval in which a CUSUM-type statistic
+  exceeds a threshold, and identifies a change point within that interval.
+  Iterates to find all change points.
+- Reference: Baranowski, R., Chen, Y., Fryzlewicz, P. (2019). "Narrowest-
+  Over-Threshold Detection of Multiple Change Points and Change-Point-Like
+  Features." *Journal of the Royal Statistical Society: Series B*, 81(3),
+  649-672.
+- Handles both piecewise-constant (change in mean) and piecewise-linear
+  (change in slope / kinks) signals within the same framework.
+- **R package**: `not`. No mature Python implementation.
+- Sharper localisation of closely-spaced breakpoints than binary
+  segmentation, because it focuses on the narrowest informative interval
+  rather than the widest.
+- **Well suited** for this application given the known presence of distinct
+  ramp segments.
+- **Drawback**: R-only; no built-in slope confidence intervals.
+
+### 3.10 Wild Binary Segmentation (WBS) and Seeded Binary Segmentation (SBS)
+
+- **WBS**: improves over standard binary segmentation by drawing a large
+  number of random sub-intervals and applying a CUSUM test on each, then
+  selecting the most significant split. Much more robust than vanilla binary
+  segmentation when breakpoints are closely spaced or have small amplitudes.
+- WBS reference: Fryzlewicz, P. (2014). "Wild binary segmentation for
+  multiple change-point detection." *Annals of Statistics*, 42(6), 2243-2281.
+- **SBS**: replaces the random sub-intervals of WBS with a deterministic
+  "seeded" set, giving reproducible results with near-linear computational
+  complexity and proven minimax optimality.
+- SBS reference: Kovács, S., Li, H., Bühlmann, P., Munk, A. (2023).
+  "Seeded Binary Segmentation: A General Methodology for Fast and Optimal
+  Change Point Detection." *Biometrika*, 110(1), 249-256.
+- **R packages**: `wbs` (WBS), `breakfast` (SBS and variants). Python:
+  limited; SBS has a [GitHub implementation](https://github.com/kovacssolt/ChangePoints).
+- Primarily detect changes in mean; adapting to changes in slope requires
+  an appropriate CUSUM statistic.
+- **Useful** as a fast pre-screening step or for benchmarking against
+  the more specialised CPOP / NOT methods.
+
 ---
 
 ## 4. Slope Estimation and Uncertainty
@@ -294,6 +355,34 @@ several integrated strategies are available:
 - **Cons**: complex to implement and tune. Overkill for offline analysis
   of a known-structure signal.
 
+### Option G: L1 Trend Filtering
+
+- **Tool**: Python `cvxpy` or R `genlasso`
+- **How**: minimise the L1 norm of the second differences subject to a
+  data-fidelity term. The penalty λ controls the number of segments; tune
+  via BIC or cross-validation.
+- **Pros**: convex problem (global optimum guaranteed), no need to specify
+  the number of breakpoints, directly produces a piecewise-linear fit.
+- **Cons**: no built-in confidence intervals; breakpoint locations are
+  implicit (read off as kinks in the solution); λ must be tuned.
+
+### Option H: NOT (Narrowest-Over-Threshold)
+
+- **Tool**: R `not`
+- **How**: iteratively find the narrowest interval in which a CUSUM-type
+  statistic exceeds a threshold, identify a change point within that
+  interval, and repeat until no further change points are found. Then fit
+  OLS on each identified segment.
+- **Pros**: sharper breakpoint localisation than binary segmentation when
+  the fast/slow ramp boundary is tight; no need to specify the number of
+  breakpoints; well suited to this signal structure (handles piecewise-
+  linear / kink signals natively).
+- **Cons**: R-only; no built-in slope or breakpoint confidence intervals
+  (use bootstrap post-hoc). WBS/SBS (`wbs`/`breakfast` packages) can serve
+  as a faster pre-screening alternative before applying NOT, but require
+  adapting the CUSUM statistic to detect slope changes rather than mean
+  shifts.
+
 ---
 
 ## 6. Tracking Degradation Over Time
@@ -324,6 +413,9 @@ To monitor aging (slope flattening across many closing events):
 | `strucchange` | R | Bai-Perron | Yes | Yes | General regression |
 | `scipy.signal.savgol_filter` | Python | SG filter | No | No | Preprocessing |
 | `statsmodels` | Python | OLS/RLM | Yes | N/A | Post-segmentation |
+| `cvxpy` / `genlasso` | Python / R | L1 trend filtering | Manual | Manual | Yes (automatic knots) |
+| `not` | R | Narrowest-Over-Threshold | Manual | No | Yes (kinks) |
+| `wbs` / `breakfast` | R | WBS / SBS | Manual | No | Via CUSUM statistic |
 
 ---
 
@@ -355,6 +447,18 @@ To monitor aging (slope flattening across many closing events):
     Change Points." OSF Preprint.
 12. Rabiner, L.R. (1989). "A Tutorial on Hidden Markov Models." *Proc.
     IEEE*, 77(2), 257-286.
+13. Kim, S., Koh, K., Boyd, S., Gorinevsky, D. (2009). "ℓ1 Trend
+    Filtering." *SIAM Review*, 51(2), 339-360.
+14. Tibshirani, R.J. (2014). "Adaptive piecewise polynomial estimation via
+    trend filtering." *Annals of Statistics*, 42(1), 285-323.
+15. Baranowski, R., Chen, Y., Fryzlewicz, P. (2019). "Narrowest-Over-
+    Threshold Detection of Multiple Change Points and Change-Point-Like
+    Features." *JRSS-B*, 81(3), 649-672.
+16. Fryzlewicz, P. (2014). "Wild binary segmentation for multiple change-
+    point detection." *Annals of Statistics*, 42(6), 2243-2281.
+17. Kovács, S., Li, H., Bühlmann, P., Munk, A. (2023). "Seeded Binary
+    Segmentation: A General Methodology for Fast and Optimal Change Point
+    Detection." *Biometrika*, 110(1), 249-256.
 
 ---
 
