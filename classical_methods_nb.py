@@ -14,6 +14,7 @@ def _():
     from bokeh.models import Label, Span
     from bokeh.plotting import figure as bk_figure
     from bokeh.resources import CDN
+    from bokeh.io import show
     from gate_analysis.common import generate_synthetic_data, plot_results
 
     return (
@@ -28,11 +29,12 @@ def _():
         importlib,
         mo,
         plot_results,
+        show,
     )
 
 
 @app.cell(hide_code=True)
-def _(base64, file_html, CDN, mo):
+def _(CDN, base64, file_html, mo):
     def bk(fig, height=650):
         """Embed a bokeh figure or layout in marimo via a base64-encoded iframe."""
         html = file_html(fig, CDN)
@@ -43,27 +45,23 @@ def _(base64, file_html, CDN, mo):
             f"</iframe>"
         )
 
-    return (bk,)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        # Gate Closing Analysis — Method Comparison
+    mo.md(r"""
+    # Gate Closing Analysis — Method Comparison
 
-        Seven methods for detecting breakpoints and measuring slopes in pipe gate closing signals.
+    Seven methods for detecting breakpoints and measuring slopes in pipe gate closing signals.
 
-        **Signal structure:** high plateau → fast linear ramp → slow linear ramp → low plateau
+    **Signal structure:** high plateau → fast linear ramp → slow linear ramp → low plateau
 
-        **True breakpoints:** 2.0 s, 5.0 s, 9.0 s &nbsp;|&nbsp; **True slopes:** −25.0 %/s, −5.0 %/s
+    **True breakpoints:** 2.0 s, 5.0 s, 9.0 s &nbsp;|&nbsp; **True slopes:** −25.0 %/s, −5.0 %/s
 
-        Green dotted lines = ground truth breakpoints. Red dashed lines = detected breakpoints.
-"""
-    )
-
-
-# ── Synthetic data ────────────────────────────────────────────────────────────
+    Green dotted lines = ground truth breakpoints. Red dashed lines = detected breakpoints.
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -74,145 +72,115 @@ def _(generate_synthetic_data):
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md("## Raw synthetic data")
+    mo.md(r"""
+    ## Method 1 — Segmented Regression (Muggeo)
+    *Library:* `piecewise-regression` &nbsp;|&nbsp; *Best accuracy / speed trade-off*
+    """)
+    return
 
 
 @app.cell
-def _(bk, data, plot_results):
-    return bk(plot_results(data, "Synthetic Gate Closing Data"))
-
-
-# ── Method 1 ─────────────────────────────────────────────────────────────────
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    return mo.md(
-        r"""
-        ## Method 1 — Segmented Regression (Muggeo)
-        *Library:* `piecewise-regression` &nbsp;|&nbsp; *Best accuracy / speed trade-off*
-        """
-    )
-
-
-@app.cell
-def _(bk, data, importlib, plot_results):
+def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.1_segmented_regression")
     _result = _m.segmented_regression(data.time, data.position)
     _segs = _m._build_segments(data, _result)
-    return bk(
-        plot_results(
-            data,
-            "Method 1 — Segmented Regression (Muggeo)",
-            fitted_segments=_segs,
-            detected_breakpoints=_result["breakpoints"],
-            estimated_slopes=_result["slopes"],
-        )
+    _fig = plot_results(
+        data,
+        "Option A: Segmented Regression (Muggeo)",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
     )
-
-
-# ── Method 2 ─────────────────────────────────────────────────────────────────
+    show(_fig)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 2 — Bayesian Change-Point Model (PyMC + ADVI)
-        *Library:* `pymc` &nbsp;|&nbsp; *Best UQ; approximate Gaussian posterior via variational inference (~5 s)*
-        """
-    )
+    mo.md(r"""
+    ## Method 2 — Bayesian Change-Point Model (PyMC + ADVI)
+    *Library:* `pymc` &nbsp;|&nbsp; *Best UQ; approximate Gaussian posterior via variational inference (~5 s)*
+    """)
+    return
 
 
 @app.cell
-def _(bk, data, importlib, plot_results):
+def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.2_bayesian_changepoint")
     _result = _m.bayesian_changepoint(data.time, data.position)
     _segs = _m._build_segments(data, _result)
-    return bk(
-        plot_results(
-            data,
-            "Method 2 — Bayesian Change-Point (PyMC + ADVI)",
-            fitted_segments=_segs,
-            detected_breakpoints=_result["breakpoints"],
-            estimated_slopes=_result["slopes"],
-        )
+    _fig = plot_results(
+        data,
+        "Option B: Bayesian Change-Point Model (PyMC + ADVI)",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
     )
-
-
-# ── Method 3 ─────────────────────────────────────────────────────────────────
+    show(_fig)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 3 — CPOP Piecewise Linear (L0 penalty)
-        *Library:* numpy only (DP + BIC) &nbsp;|&nbsp; *Accurate, ~4 s*
-        """
-    )
+    mo.md(r"""
+    ## Method 3 — CPOP Piecewise Linear (L0 penalty)
+    *Library:* numpy only (DP + BIC) &nbsp;|&nbsp; *Accurate, ~4 s*
+    """)
+    return
 
 
 @app.cell
-def _(bk, data, importlib, plot_results):
+def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.3_cpop_piecewise_linear")
     _result = _m.cpop_piecewise_linear(data.time, data.position)
     _segs = _m._build_segments(data, _result)
-    return bk(
-        plot_results(
-            data,
-            "Method 3 — CPOP Piecewise Linear (L0 penalty)",
-            fitted_segments=_segs,
-            detected_breakpoints=_result["breakpoints"],
-            estimated_slopes=_result["slopes"],
-        )
+    _fig = plot_results(
+        data,
+        "Option C: CPOP-like Continuous Piecewise Linear",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
     )
-
-
-# ── Method 4 ─────────────────────────────────────────────────────────────────
+    show(_fig)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 4 — ruptures + OLS
-        *Library:* `ruptures` + `scipy` &nbsp;|&nbsp; *Less accurate (L2 cost)*
-        """
-    )
+    mo.md(r"""
+    ## Method 4 — ruptures + OLS
+    *Library:* `ruptures` + `scipy` &nbsp;|&nbsp; *Less accurate (L2 cost)*
+    """)
+    return
 
 
 @app.cell
-def _(bk, data, importlib, plot_results):
+def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.4_ruptures_ols")
     _result = _m.ruptures_ols(data.time, data.position)
     _segs = _m._build_segments(data, _result)
-    return bk(
-        plot_results(
-            data,
-            "Method 4 — ruptures + OLS",
-            fitted_segments=_segs,
-            detected_breakpoints=_result["breakpoints"],
-            estimated_slopes=_result["slopes"],
-        )
+    _fig = plot_results(
+        data,
+        "Option D: ruptures + OLS",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
     )
-
-
-# ── Method 5 ─────────────────────────────────────────────────────────────────
+    show(_fig)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 5 — Savitzky-Golay Derivative
-        *Library:* `scipy.signal` &nbsp;|&nbsp; *Heuristic, fast*
-        """
-    )
+    mo.md(r"""
+    ## Method 5 — Savitzky-Golay Derivative
+    *Library:* `scipy.signal` &nbsp;|&nbsp; *Heuristic, fast*
+    """)
+    return
 
 
 @app.cell
-def _(Label, Span, bk, bk_figure, column, data, importlib):
+def _(Label, Span, bk_figure, column, data, importlib, show):
     _m = importlib.import_module("gate_analysis.5_savitzky_golay")
     _r = _m.savitzky_golay(data.time, data.position)
 
@@ -290,25 +258,21 @@ def _(Label, Span, bk, bk_figure, column, data, importlib):
         )
     )
     _p2.grid.grid_line_alpha = 0.3
-
-    return bk(column(_p1, _p2), height=730)
-
-
-# ── Method 6 ─────────────────────────────────────────────────────────────────
+    show(column(_p1, _p2))
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 6 — Kalman Filter
-        *Library:* `filterpy` &nbsp;|&nbsp; *Heuristic, online-capable*
-        """
-    )
+    mo.md(r"""
+    ## Method 6 — Kalman Filter
+    *Library:* `filterpy` &nbsp;|&nbsp; *Heuristic, online-capable*
+    """)
+    return
 
 
 @app.cell
-def _(Label, Span, bk, bk_figure, column, data, importlib):
+def _(Label, Span, bk_figure, column, data, importlib, show):
     _m = importlib.import_module("gate_analysis.6_kalman_filter")
     _r = _m.kalman_filter(data.time, data.position)
 
@@ -386,37 +350,33 @@ def _(Label, Span, bk, bk_figure, column, data, importlib):
         )
     )
     _p2.grid.grid_line_alpha = 0.3
-
-    return bk(column(_p1, _p2), height=730)
-
-
-# ── Method 8 ─────────────────────────────────────────────────────────────────
+    show(column(_p1, _p2))
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    return mo.md(
-        r"""
-        ## Method 8 — Narrowest-Over-Threshold (NOT)
-        *Library:* numpy + scipy only (custom reimplementation) &nbsp;|&nbsp; *Accurate, no prior on number of breakpoints, ~1 s*
-        """
-    )
+    mo.md(r"""
+    ## Method 8 — Narrowest-Over-Threshold (NOT)
+    *Library:* numpy + scipy only (custom reimplementation) &nbsp;|&nbsp; *Accurate, no prior on number of breakpoints, ~1 s*
+    """)
+    return
 
 
 @app.cell
-def _(bk, data, importlib, plot_results):
+def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.8_not_detection")
     _result = _m.not_detection(data.time, data.position)
     _segs = _m._build_segments(data, _result)
-    return bk(
-        plot_results(
-            data,
-            "Method 8 — Narrowest-Over-Threshold (NOT)",
-            fitted_segments=_segs,
-            detected_breakpoints=_result["breakpoints"],
-            estimated_slopes=_result["slopes"],
-        )
+    _fig = plot_results(
+        data,
+        "Method 8 — Narrowest-Over-Threshold (NOT)",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
     )
+    show(_fig)
+    return
 
 
 if __name__ == "__main__":

@@ -161,14 +161,36 @@ if __name__ == "__main__":
         title="Option F: Kalman Filter with Regime Detection",
         y_axis_label="Gate position (%)",
     )
-    p1.scatter(data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2)
+    p1.scatter(
+        data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2
+    )
     p1.line(
-        data.time, result["filtered_position"], line_color="blue", line_width=1.5, legend_label="Kalman filtered"
+        data.time,
+        result["filtered_position"],
+        line_color="blue",
+        line_width=1.5,
+        legend_label="Kalman filtered",
     )
     for bp in result["breakpoints"]:
-        p1.add_layout(Span(location=bp, dimension="height", line_color="red", line_dash="dashed", line_alpha=0.7))
+        p1.add_layout(
+            Span(
+                location=bp,
+                dimension="height",
+                line_color="red",
+                line_dash="dashed",
+                line_alpha=0.7,
+            )
+        )
     for bp in data.breakpoints:
-        p1.add_layout(Span(location=bp, dimension="height", line_color="green", line_dash="dotted", line_alpha=0.4))
+        p1.add_layout(
+            Span(
+                location=bp,
+                dimension="height",
+                line_color="green",
+                line_dash="dotted",
+                line_alpha=0.4,
+            )
+        )
     p1.legend.location = "top_right"
     p1.grid.grid_line_alpha = 0.3
 
@@ -182,18 +204,33 @@ if __name__ == "__main__":
         x_range=p1.x_range,
     )
     p2.line(data.time, result["filtered_velocity"], line_color="blue", line_width=1)
-    p2.add_layout(Span(location=0, dimension="width", line_color="black", line_width=0.5))
+    p2.add_layout(
+        Span(location=0, dimension="width", line_color="black", line_width=0.5)
+    )
     for bp in result["breakpoints"]:
-        p2.add_layout(Span(location=bp, dimension="height", line_color="red", line_dash="dashed", line_alpha=0.7))
+        p2.add_layout(
+            Span(
+                location=bp,
+                dimension="height",
+                line_color="red",
+                line_dash="dashed",
+                line_alpha=0.7,
+            )
+        )
     p2.grid.grid_line_alpha = 0.3
 
     info = f"Fast slope: {result['slopes'][0]:.2f} %/s\nSlow slope: {result['slopes'][1]:.2f} %/s"
     info += f"\nTrue: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s"
     p2.add_layout(
         Label(
-            x=10, y=10, x_units="screen", y_units="screen",
-            text=info, text_font_size="9pt",
-            background_fill_color="wheat", background_fill_alpha=0.8,
+            x=10,
+            y=10,
+            x_units="screen",
+            y_units="screen",
+            text=info,
+            text_font_size="9pt",
+            background_fill_color="wheat",
+            background_fill_alpha=0.8,
         )
     )
 

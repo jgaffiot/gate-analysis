@@ -2,7 +2,7 @@
 
 ## Goal
 
-This project demonstrates seven different methods for analyzing **pipe gate
+This project demonstrates several different methods for analyzing **pipe gate
 closing curves**. The signal of interest is a gate position (in %) recorded
 over time, with the following structure:
 
@@ -20,7 +20,7 @@ A shared synthetic data generator (`common.py`) produces a realistic test
 signal with known ground-truth parameters (breakpoints at 2.0, 5.0, 9.0 s;
 slopes of -25.0 and -5.0 %/s; Gaussian noise with 1% std).
 
-## Options
+## Classical methods
 
 ### 1. Segmented Regression (`1_segmented_regression.py`)
 
@@ -158,7 +158,7 @@ uv run python -m gate_analysis.1_segmented_regression
 
 Replace `1_segmented_regression` with any of the 7 module names above.
 
-### Notebook (`notebook.py`)
+### Notebook (`classical_methods_nb.py`)
 
 The notebook is written with [marimo](https://marimo.io) and covers all seven
 methods on a single page.
@@ -166,23 +166,58 @@ methods on a single page.
 **Open as an interactive notebook** (live reactive UI in the browser):
 
 ```bash
-uv run marimo edit notebook.py
+uv run marimo edit classical_methods_nb.py
 ```
 
 **Run as a read-only app** (no editing, cleaner UI):
 
 ```bash
-uv run marimo run notebook.py
+uv run marimo run classical_methods_nb.py
 ```
 
 **Export to a self-contained HTML file** (no server needed, shareable):
 
 ```bash
-uv run marimo export html notebook.py -o notebook.html
+uv run marimo export html classical_methods_nb.py -o classical_methods_nb.html
 ```
 
 **Run as a plain Python script** (prints results to stdout, no browser):
 
 ```bash
-uv run python notebook.py
+uv run python classical_methods_nb.py
+```
+
+### Transformer-based methods
+
+Transformer-based approach (section 9 of `biblio.md`).
+
+#### Notebook (`transformer_methods_nb.py`)
+
+A dedicated marimo notebook for the Transformer-based approach.
+
+It walks through:
+
+1. Loading `AutonLab/MOMENT-1-large` from HuggingFace (~800 MB, cached after
+   first run)
+2. **Zero-shot reconstruction** — sliding-window reconstruction error as a
+   change-point signal (with honest assessment of its limitations)
+3. **Fine-tuned Conv1D head** — training a lightweight head on frozen MOMENT
+   patch embeddings using entirely synthetic data from `generate_synthetic_data()`
+4. **Inference** — vote-accumulation strategy over overlapping windows
+5. **Results and discussion** — comparison with classical methods
+
+It requires heavy libraries (including PyTorch), totaling several Go on disk.
+
+```bash
+# Install dependencies
+uv sync --group transformer
+
+# Interactive notebook
+uv run marimo edit transformer_methods_nb.py
+
+# Read-only app
+uv run marimo run transformer_methods_nb.py
+
+# Self-contained HTML export
+uv run marimo export html transformer_methods_nb.py -o transformer_methods_nb.html
 ```
