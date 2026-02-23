@@ -23,61 +23,37 @@ def _fit_continuous_piecewise_linear(
 
     Returns (rss, slopes, fitted_values).
     The fit is constrained to be continuous at breakpoints.
-    We parameterize by: intercept at t=0 and one slope per segment.
-    Continuity is enforced by construction.
+    Parameterisation: intercept + one cumulative-basis slope per segment.
+
+    The design matrix column k+1 encodes the contribution of segment k's
+    slope to each sample:
+      - 0                      for samples before segment k starts
+      - time[j] - time[i_start] for samples within segment k
+      - time[i_end] - time[i_start] for samples after segment k ends
+
+    Built with pure NumPy broadcasting (no Python inner loop over samples).
     """
     n = len(time)
     bps = [0, *breakpoint_indices, n]
     n_segments = len(bps) - 1
+    indices = np.arange(n)
 
-    # Build design matrix for continuous piecewise linear:
-    # y(t) = a + slope_0 * t  for t in [t_0, t_bp1]
-    # y(t) = a + slope_0 * t_bp1 + slope_1 * (t - t_bp1) for t in [t_bp1, t_bp2]
-    # etc.
-    # Rewrite: y(t) = a + sum_k slope_k * basis_k(t)
-    # where basis_k(t) = max(0, min(t, t_{k+1}) - t_k) clipped to segment k
     design = np.zeros((n, n_segments + 1))
-    design[:, 0] = 1.0  # intercept
-
-    for k in range(n_segments):
-        t_start = time[bps[k]]
-        t_end = time[bps[k + 1] - 1] if bps[k + 1] < n else time[-1]
-        for j in range(n):
-            if time[j] <= t_start:
-                design[j, k + 1] = 0.0
-            elif time[j] >= t_end and k < n_segments - 1:
-                design[j, k + 1] = t_end - t_start
-            else:
-                design[j, k + 1] = time[j] - t_start
-        # For subsequent segments, accumulate previous segment widths
-        if k > 0:
-            pass  # already handled by the cumulative basis
-
-    # Cumulative basis: segment k's contribution at time t
-    # Easier approach: direct parameterization
-    # y(t) = intercept + slope_0*(t - t0) for segment 0
-    # y(t) = y(t_bp1) + slope_1*(t - t_bp1) for segment 1, etc.
-    # This is linear in (intercept, slope_0, slope_1, ...) with continuity built in.
-
-    design2 = np.zeros((n, n_segments + 1))
-    design2[:, 0] = 1.0
+    design[:, 0] = 1.0
     for k in range(n_segments):
         i_start = bps[k]
+        i_end = bps[k + 1]  # exclusive upper index
         t_start = time[i_start]
-        for j in range(n):
-            if j < i_start:
-                # Before this segment: this slope contributes 0
-                design2[j, k + 1] = 0.0
-            elif j < bps[k + 1]:
-                # Within this segment
-                design2[j, k + 1] = time[j] - t_start
-            else:
-                # After this segment: full contribution
-                design2[j, k + 1] = time[bps[k + 1] - 1] - t_start
+        t_end_val = time[i_end - 1]  # bps[-1]=n so time[n-1]=time[-1] for last seg
+        design[:, k + 1] = np.where(
+            indices < i_start,
+            0.0,
+            np.where(indices < i_end, time - t_start, t_end_val - t_start),
+        )
 
     # Solve least squares
-    coeffs, rss_arr, _, _ = np.linalg.lstsq(design2, position, rcond=None)
-    fitted = design2 @ coeffs
+    coeffs, _rss_arr, _rank, _sv = np.linalg.lstsq(design, position, rcond=None)
+    fitted = design @ coeffs
     rss = float(np.sum((position - fitted) ** 2))
     slopes = coeffs[1:].tolist()
 
@@ -90,6 +66,7 @@ def cpop_piecewise_linear(
     *,
     penalty: float | None = None,
     max_breakpoints: int = 5,
+    n_breakpoints: int | None = None,
 ) -> dict[str, Any]:
     """CPOP-like segmentation using dynamic programming with L0 penalty.
 
@@ -107,7 +84,12 @@ def cpop_piecewise_linear(
     penalty : float or None
         L0 penalty per breakpoint. If None, uses BIC (2 * log(n)).
     max_breakpoints : int
-        Maximum number of breakpoints to consider.
+        Maximum number of breakpoints to consider (used when n_breakpoints
+        is None).
+    n_breakpoints : int or None
+        If given, skip model selection and fit only this exact number of
+        breakpoints.  Eliminates the outer BIC loop — use when the signal
+        topology is known (e.g. n_breakpoints=3 for the gate signal).
 
     Returns
     -------
@@ -125,7 +107,10 @@ def cpop_piecewise_linear(
     best_result: dict[str, Any] = {}
     bic_scores: list[tuple[int, float]] = []
 
-    for n_bps in range(0, max_breakpoints + 1):
+    counts = (
+        [n_breakpoints] if n_breakpoints is not None else range(0, max_breakpoints + 1)
+    )
+    for n_bps in counts:
         if n_bps == 0:
             rss, slopes, fitted = _fit_continuous_piecewise_linear(time, position, [])
             cost = rss + penalty * 0

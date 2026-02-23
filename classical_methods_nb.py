@@ -99,7 +99,7 @@ def _(data, importlib, plot_results, show):
 def _(mo):
     mo.md(r"""
     ## Method 1 — Segmented Regression (Muggeo)
-    *Library:* `piecewise-regression` &nbsp;|&nbsp; *Best accuracy / speed trade-off*
+    *Library:* `piecewise-regression` &nbsp;|&nbsp; *Best accuracy / speed trade-off (~0.9 s with n\_boot=10)*
     """)
     return
 
@@ -123,8 +123,8 @@ def _(data, importlib, plot_results, show):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Method 2 — Bayesian Change-Point Model (PyMC + ADVI)
-    *Library:* `pymc` &nbsp;|&nbsp; *Best UQ; approximate Gaussian posterior via variational inference (~5 s)*
+    ## Method 2 — Bayesian MAP + Laplace (scipy)
+    *Library:* `scipy.optimize` &nbsp;|&nbsp; *Full Bayesian model; MAP via Powell + Laplace covariance for 95 % CIs (~0.25 s)*
     """)
     return
 

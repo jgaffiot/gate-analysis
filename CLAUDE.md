@@ -50,9 +50,9 @@ This is a demo/research project (Python 3.13, managed with `uv`) that implements
 | # | File | Library | Accuracy |
 |---|------|---------|----------|
 | 0 | `0_curve_fit.py` | `scipy.optimize` | Best accuracy + speed; requires known topology |
-| 1 | `1_segmented_regression.py` | `piecewise-regression` | Best accuracy/speed trade-off |
-| 2 | `2_bayesian_changepoint.py` | `pymc` (NUTS MCMC) | Best UQ, ~5 min runtime |
-| 3 | `3_cpop_piecewise_linear.py` | numpy only (DP + BIC) | Accurate, ~4 s |
+| 1 | `1_segmented_regression.py` | `piecewise-regression` | Accurate, ~0.9 s (n_boot=10) |
+| 2 | `2_bayesian_changepoint.py` | `scipy.optimize` (MAP + Laplace) | Best UQ, ~0.25 s |
+| 3 | `3_cpop_piecewise_linear.py` | numpy only (DP + BIC) | Accurate, ~2 s; ~0.3 s with n_breakpoints=3 |
 | 4 | `4_ruptures_ols.py` | `ruptures` + `scipy` | Less accurate (L2 cost) |
 | 5 | `5_savitzky_golay.py` | `scipy.signal` | Heuristic, fast |
 | 6 | `6_kalman_filter.py` | `filterpy` | Heuristic, online-capable |

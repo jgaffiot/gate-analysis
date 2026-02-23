@@ -48,14 +48,23 @@ battle-tested approach.
 
 ### 2. Bayesian Changepoint Model (`2_bayesian_changepoint.py`)
 
-**Library:** `pymc`
+**Library:** `scipy.optimize` (numpy only)
 
-Defines a full probabilistic model with 4 regimes (two plateaus + two ramps),
-3 ordered change points, and Gaussian noise. Uses NUTS MCMC sampling to
-produce posterior distributions on all parameters. Gives credible intervals
-on slopes and breakpoints for free. The model encodes the known physical
-structure as priors, which helps convergence. Slowest option by far due to
-MCMC, but best for principled uncertainty quantification.
+Defines the same probabilistic model as a full Bayesian treatment: 3 ordered
+change points via positive offsets, Gaussian priors on plateau levels and
+slopes, half-Normal priors on gap widths and noise. Inference uses two cheap
+steps instead of MCMC:
+1. **MAP** — `scipy.optimize.minimize` (Powell, gradient-free) finds the
+   mode of the posterior in ~0.1 s.
+2. **Laplace approximation** — the numerical Hessian of the negative
+   log-posterior at the MAP gives a Gaussian posterior approximation. Its
+   inverse is the covariance matrix; diagonal square roots are parameter
+   standard errors; 95 % credible intervals follow by the delta method.
+
+For a unimodal, well-identified posterior like this one the Laplace
+approximation is equivalent to ADVI's Gaussian variational family — the same
+uncertainty estimates — but runs in ~0.25 s without any probabilistic-
+programming dependency.
 
 ### 3. CPOP-like Continuous Piecewise Linear (`3_cpop_piecewise_linear.py`)
 
@@ -65,7 +74,9 @@ Inspired by Fearnhead et al. (2019), this implements a simplified
 dynamic-programming approach with an L0 penalty on slope changes. For each
 candidate number of breakpoints (0 to 5), it finds optimal breakpoint
 placement by iterative coordinate-wise refinement, then selects the best
-model using BIC. Enforces continuity at breakpoints by construction.
+model using BIC. Enforces continuity at breakpoints by construction. Pass
+`n_breakpoints=3` to skip model selection when the topology is known (~6×
+faster: ~0.3 s vs ~2 s).
 
 ### 4. ruptures + OLS (`4_ruptures_ols.py`)
 
@@ -121,9 +132,9 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 | # | Method | Breakpoints (s) | Fast slope (%/s) | Slow slope (%/s) | Time |
 |---|--------|-----------------|-------------------|-------------------|------|
 | 0 | Direct curve fit (scipy) | 2.000, 5.003, 9.165 | -24.99 | -5.02 | <1 s |
-| 1 | Segmented regression | 2.000, 5.003, 9.145 | -24.99 | -5.03 | ~2 s |
-| 2 | Bayesian changepoint | 2.003, 4.985, 9.257 | -25.20 | -4.96 | ~5 min |
-| 3 | CPOP piecewise linear | 1.980, 5.040, 9.180 | -24.79 | -4.96 | ~4 s |
+| 1 | Segmented regression | 2.000, 5.003, 9.145 | -24.99 | -5.03 | ~0.9 s |
+| 2 | Bayesian MAP + Laplace | 1.999, 5.004, 8.980 | -24.98 | -5.01 | ~0.25 s |
+| 3 | CPOP piecewise linear | 1.980, 5.040, 9.180 | -24.79 | -4.96 | ~2 s (~0.3 s with n_breakpoints=3) |
 | 4 | ruptures + OLS | 2.850, 4.300, 6.900 | -25.18 | -8.64 | ~1 s |
 | 5 | Savitzky-Golay | 0.390, 5.000, 11.990 | -22.67 | -3.41 | ~1 s |
 | 6 | Kalman filter | 0.040, 8.010, 11.800 | -11.91 | -4.78 | ~1 s |

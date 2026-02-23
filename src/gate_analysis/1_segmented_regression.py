@@ -40,7 +40,7 @@ def segmented_regression(
         time.tolist(),
         position.tolist(),
         n_breakpoints=n_breakpoints,
-        n_boot=100,
+        n_boot=10,
     )
 
     results = model.get_results()
@@ -49,7 +49,9 @@ def segmented_regression(
         raise RuntimeError(msg)
 
     breakpoints: list[float] = []
-    slopes: list[float] = []
+    # piecewise-regression returns alpha_k = absolute slope of segment k
+    # (beta_k = kink magnitude = alpha_{k+1} - alpha_k, also in the results)
+    all_slopes: list[float] = []
 
     for bp_key in sorted(k for k in results["estimates"] if k.startswith("breakpoint")):
         bp_est = results["estimates"][bp_key]["estimate"]
@@ -57,21 +59,21 @@ def segmented_regression(
 
     for alpha_key in sorted(k for k in results["estimates"] if k.startswith("alpha")):
         slope_est = results["estimates"][alpha_key]["estimate"]
-        slopes.append(float(slope_est))
+        all_slopes.append(float(slope_est))
 
-    # Cumulative slopes: piecewise-regression returns incremental alphas
-    # alpha1 = first slope, alpha2 = change from first to second, etc.
-    cumulative_slopes = list(np.cumsum(slopes))
+    # all_slopes = [plateau_high, fast_slope, slow_slope, plateau_low]
+    # Keep only the two closing slopes for reporting (consistent with other methods)
+    slopes = all_slopes[1:3]
 
     print("=== Option A: Segmented Regression (Muggeo) ===")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints]}")
-    print(f"Cumulative slopes: {[f'{s:.2f}' for s in cumulative_slopes]}")
+    print(f"Slopes: {[f'{s:.2f}' for s in slopes]}")
     model.summary()
 
     return {
         "breakpoints": breakpoints,
-        "slopes": cumulative_slopes,
-        "incremental_slopes": slopes,
+        "slopes": slopes,
+        "all_slopes": all_slopes,
         "summary": results,
         "model": model,
     }
