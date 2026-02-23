@@ -658,8 +658,610 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo):
+    mo.md(r"""
+    ## §5 — TCDformer LLSA: learnable local linear change-point detector
+
+    **TCDformer** (Tang et al., 2023) introduces an *LLSA* (Local Linear Scaling Approximation)
+    module as its learnable front-end. The core idea: decompose the signal into patches and fit
+    a local linear trend to each — analogous to classical piecewise regression. Abrupt **slope
+    discontinuities** between adjacent patches signal change points.
+
+    Here we demo the LLSA front-end **standalone**, as a lightweight Conv1D network:
+
+    1. A strided `Conv1d` (kernel = patch\_len, stride = patch\_len) projects each 8-sample
+       patch into a feature vector (learnable local linear projection).
+    2. Two parallel convolutions at different kernel sizes extract multi-scale slope features.
+    3. A 1×1 `Conv1d` head produces per-patch change-point logits.
+
+    Trained supervised on the same 600 synthetic windows as the MOMENT fine-tuned head —
+    results are directly comparable.
+    """)
+    return
+
+
+@app.cell
+def _(nn, torch):
+    class LLSAEncoder(nn.Module):
+        """Local Linear Scaling Approximation encoder (TCDformer front-end)."""
+
+        def __init__(self, patch_len=8, d_model=32):
+            super().__init__()
+            # Strided conv = local linear projection of each patch
+            self.local_proj = nn.Conv1d(
+                1, d_model, kernel_size=patch_len, stride=patch_len
+            )
+            # Multi-scale feature extraction (two kernel sizes)
+            self.scale1 = nn.Conv1d(d_model, 64, kernel_size=3, padding=1)
+            self.scale2 = nn.Conv1d(d_model, 64, kernel_size=5, padding=2)
+            self.head = nn.Conv1d(128, 1, kernel_size=1)
+
+        def forward(self, x):  # x: (B, 1, seq_len)
+            h = self.local_proj(x)  # (B, d_model, n_patches)
+            h = torch.relu(torch.cat([self.scale1(h), self.scale2(h)], dim=1))
+            return self.head(h).squeeze(1)  # (B, n_patches) logits
+
+    return (LLSAEncoder,)
+
+
+@app.cell
+def _(LLSAEncoder, PATCH_LEN, mo, nn, np, torch, train_labels, train_windows):
+    _llsa = LLSAEncoder()
+    _opt_llsa = torch.optim.Adam(_llsa.parameters(), lr=1e-3)
+
+    # Labels in patch space (same mapping as MOMENT Conv1D head)
+    _llsa_patch_labels = torch.tensor(train_labels // PATCH_LEN, dtype=torch.long)
+
+    _perm_llsa = torch.randperm(len(train_windows))
+    _n_tr_llsa = int(0.8 * len(train_windows))
+    _tr_llsa = _perm_llsa[:_n_tr_llsa]
+    _va_llsa = _perm_llsa[_n_tr_llsa:]
+
+    _N_EPOCHS_LLSA = 60
+    _BATCH_LLSA = 32
+    _llsa_losses_list, _llsa_maes_list = [], []
+
+    with mo.status.spinner(f"Training LLSA-CNN ({_N_EPOCHS_LLSA} epochs)…"):
+        for _ep_llsa in range(_N_EPOCHS_LLSA):
+            _llsa.train()
+            _idx_llsa = _tr_llsa[torch.randperm(len(_tr_llsa))]
+            for _i_llsa in range(0, len(_idx_llsa), _BATCH_LLSA):
+                _b_llsa = _idx_llsa[_i_llsa : _i_llsa + _BATCH_LLSA]
+                _x_llsa = torch.tensor(
+                    train_windows[_b_llsa.numpy()], dtype=torch.float32
+                ).unsqueeze(1)  # (B, 1, 512)
+                _logits_llsa = _llsa(_x_llsa)  # (B, 64)
+                _loss_llsa = nn.functional.cross_entropy(
+                    _logits_llsa, _llsa_patch_labels[_b_llsa]
+                )
+                _opt_llsa.zero_grad()
+                _loss_llsa.backward()
+                _opt_llsa.step()
+            _llsa_losses_list.append(float(_loss_llsa))
+
+            _llsa.eval()
+            with torch.no_grad():
+                _xv_llsa = torch.tensor(
+                    train_windows[_va_llsa.numpy()], dtype=torch.float32
+                ).unsqueeze(1)
+                _logv_llsa = _llsa(_xv_llsa)
+                _mae_llsa = (
+                    (_logv_llsa.argmax(1) - _llsa_patch_labels[_va_llsa])
+                    .float()
+                    .abs()
+                    .mean()
+                )
+            _llsa_maes_list.append(float(_mae_llsa))
+
+    llsa_model = _llsa
+    llsa_losses_tr = np.array(_llsa_losses_list)
+    llsa_maes_va = np.array(_llsa_maes_list)
+
+    mo.output.replace(
+        mo.callout(
+            mo.md(
+                f"LLSA-CNN training complete — final val MAE: "
+                f"**{_llsa_maes_list[-1]:.1f} patches** "
+                f"= **{_llsa_maes_list[-1] * PATCH_LEN * 0.01:.2f} s**"
+            ),
+            kind="success",
+        )
+    )
+    return llsa_losses_tr, llsa_maes_va, llsa_model
+
+
+@app.cell(hide_code=True)
+def _(figure, llsa_losses_tr, llsa_maes_va, show):
+    _epochs_llsa = list(range(1, len(llsa_losses_tr) + 1))
+    _p_llsa = figure(
+        width=1100,
+        height=280,
+        title="LLSA-CNN — training curve",
+        x_axis_label="Epoch",
+        y_axis_label="Value",
+    )
+    _p_llsa.line(
+        _epochs_llsa,
+        llsa_losses_tr,
+        line_color="steelblue",
+        line_width=2,
+        legend_label="Train cross-entropy loss",
+    )
+    _p_llsa.line(
+        _epochs_llsa,
+        llsa_maes_va,
+        line_color="orange",
+        line_width=2,
+        legend_label="Val MAE (patches)",
+    )
+    _p_llsa.legend.location = "top_right"
+    _p_llsa.grid.grid_line_alpha = 0.3
+    show(_p_llsa, height=300)
+    return
+
+
+@app.cell
+def _(
+    PATCH_LEN,
+    SEQ_LEN,
+    data,
+    find_peaks,
+    gaussian_filter1d,
+    linregress,
+    llsa_model,
+    np,
+    torch,
+):
+    _pos_llsa = data.position.astype(np.float32)
+    _n_llsa = len(_pos_llsa)
+    _pad_llsa = SEQ_LEN // 2
+    _padded_llsa = np.pad(_pos_llsa, (_pad_llsa, _pad_llsa), mode="edge")
+
+    _step_llsa = PATCH_LEN
+    _starts_llsa = range(0, _n_llsa, _step_llsa)
+    _n_patches_total_llsa = _n_llsa // PATCH_LEN + 1
+    _votes_llsa = np.zeros(_n_patches_total_llsa)
+
+    llsa_model.eval()
+    with torch.no_grad():
+        for _s_llsa in _starts_llsa:
+            _seg_llsa = _padded_llsa[_s_llsa : _s_llsa + SEQ_LEN]
+            _x_inf_llsa = (
+                torch.tensor(_seg_llsa, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            )
+            _logits_inf_llsa = llsa_model(_x_inf_llsa)  # (1, 64)
+            _probs_inf_llsa = torch.softmax(_logits_inf_llsa.squeeze(0), dim=0).numpy()
+            for _k_llsa, _prob_llsa in enumerate(_probs_inf_llsa):
+                _abs_samp_llsa = (_s_llsa - _pad_llsa) + _k_llsa * PATCH_LEN
+                _abs_patch_llsa = _abs_samp_llsa // PATCH_LEN
+                if 0 <= _abs_patch_llsa < _n_patches_total_llsa:
+                    _votes_llsa[_abs_patch_llsa] += _prob_llsa
+
+    _votes_llsa_sm = gaussian_filter1d(_votes_llsa, sigma=3)
+    _th_llsa = _votes_llsa_sm.mean() + 0.5 * _votes_llsa_sm.std()
+    _pks_llsa, _ = find_peaks(_votes_llsa_sm, distance=10, height=_th_llsa)
+    llsa_bkp_times = sorted([int(_pk) * PATCH_LEN * 0.01 for _pk in _pks_llsa])
+    llsa_votes = _votes_llsa_sm
+
+    _bkp_idx_llsa = [int(t / 0.01) for t in llsa_bkp_times]
+    _seg_bounds_llsa = [0] + _bkp_idx_llsa + [_n_llsa]
+    llsa_slopes = []
+    for _i_seg_llsa in range(len(_seg_bounds_llsa) - 1):
+        _sl_llsa = _seg_bounds_llsa[_i_seg_llsa]
+        _sr_llsa = _seg_bounds_llsa[_i_seg_llsa + 1]
+        if _sr_llsa - _sl_llsa < 2:
+            llsa_slopes.append(float("nan"))
+            continue
+        _lr_llsa = linregress(
+            data.time[_sl_llsa:_sr_llsa], _pos_llsa[_sl_llsa:_sr_llsa]
+        )
+        llsa_slopes.append(float(_lr_llsa.slope))
+
+    return llsa_bkp_times, llsa_slopes, llsa_votes
+
+
+@app.cell(hide_code=True)
+def _(
+    PATCH_LEN,
+    Span,
+    data,
+    figure,
+    llsa_bkp_times,
+    llsa_votes,
+    np,
+    plot_results,
+    show,
+):
+    from bokeh.layouts import column as _col_llsa
+
+    _fig1_llsa = plot_results(
+        data,
+        "§5 — TCDformer LLSA: detected breakpoints",
+        detected_breakpoints=llsa_bkp_times,
+    )
+    _patch_times_llsa = np.arange(len(llsa_votes)) * PATCH_LEN * 0.01
+    _p2_llsa = figure(
+        width=1100,
+        height=200,
+        title="LLSA vote accumulator (softmax probability mass per absolute patch)",
+        x_axis_label="Time (s)",
+        y_axis_label="Votes",
+        x_range=_fig1_llsa.x_range,
+    )
+    _p2_llsa.line(_patch_times_llsa, llsa_votes, line_color="teal", line_width=1.5)
+    for _bp_llsa in llsa_bkp_times:
+        _p2_llsa.add_layout(
+            Span(
+                location=_bp_llsa,
+                dimension="height",
+                line_color="red",
+                line_dash="dashed",
+                line_alpha=0.8,
+            )
+        )
+    for _bp_llsa_t in data.breakpoints:
+        _p2_llsa.add_layout(
+            Span(
+                location=_bp_llsa_t,
+                dimension="height",
+                line_color="green",
+                line_dash="dotted",
+                line_alpha=0.5,
+            )
+        )
+    _p2_llsa.grid.grid_line_alpha = 0.3
+    show(_col_llsa(_fig1_llsa, _p2_llsa), height=900)
+    return
+
+
+@app.cell(hide_code=True)
+def _(data, llsa_bkp_times, llsa_slopes, mo):
+    _abs_llsa = [(abs(s), i, s) for i, s in enumerate(llsa_slopes) if s == s]
+    _abs_llsa.sort(reverse=True)
+    _ramp_slopes_llsa = (
+        [_abs_llsa[0][2], _abs_llsa[1][2]] if len(_abs_llsa) >= 2 else []
+    )
+    _ramp_slopes_llsa.sort()
+
+    _rows_llsa = ""
+    for _i_lr, (_det_lr, _true_lr) in enumerate(zip(llsa_bkp_times, data.breakpoints)):
+        _err_lr = abs(_det_lr - _true_lr)
+        _rows_llsa += f"| BP {_i_lr + 1} | {_true_lr:.3f} s | {_det_lr:.3f} s | {_err_lr:.3f} s |\n"
+
+    _slope_rows_llsa = ""
+    for _i_lr, (_det_s_lr, _true_s_lr) in enumerate(
+        zip(_ramp_slopes_llsa, data.slopes)
+    ):
+        _slope_rows_llsa += (
+            f"| Ramp {_i_lr + 1} | {_true_s_lr:.2f} | {_det_s_lr:.2f} | "
+            f"{abs(_det_s_lr - _true_s_lr):.2f} |\n"
+        )
+
+    mo.callout(
+        mo.md(
+            f"""**TCDformer LLSA result**
+
+### Breakpoints
+
+| | True | Detected | Error |
+|---|---|---|---|
+{_rows_llsa}
+### Ramp slopes (%/s)
+
+| | True | Detected | Error |
+|---|---|---|---|
+{_slope_rows_llsa}"""
+        ),
+        kind="info",
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## §6 — Anomaly Transformer: association discrepancy for unsupervised detection
+
+    **Anomaly Transformer** (Xu et al., ICLR 2022) reframes anomaly detection via an
+    *association discrepancy* measure. Each attention layer computes two distributions over
+    timestep pairs:
+
+    - **Prior association** P[i, j] ∝ exp(−|i−j|²/σ²) — a fixed Gaussian kernel favouring
+      nearby timesteps, representing a neutral local inductive bias.
+    - **Series association** S = softmax(QKᵀ/√d) — the standard learned self-attention,
+      which can attend to distant tokens to capture signal structure.
+
+    **Normal** timesteps pull the series association away from the Gaussian prior → high
+    KL(P‖S) + KL(S‖P) discrepancy.  **Structural breaks** disrupt the series attention
+    pattern, causing S to collapse towards the local prior → low discrepancy → high anomaly
+    score (once we invert the discrepancy signal).
+
+    The final anomaly score combines reconstruction error and inverted association discrepancy.
+    This approach is **fully unsupervised**: the model is trained only to reconstruct sliding
+    windows of the raw gate signal — no labels needed.
+    """)
+    return
+
+
+@app.cell
+def _(nn, torch):
+    class AnomalyAttention(nn.Module):
+        """One anomaly-attention layer (Xu et al., ICLR 2022)."""
+
+        def __init__(self, d_model=32, n_heads=4, scale=25.0):
+            super().__init__()
+            self.n_heads = n_heads
+            self.d_head = d_model // n_heads
+            self.qkv = nn.Linear(d_model, 3 * d_model)
+            self.out = nn.Linear(d_model, d_model)
+            self.scale = scale  # Gaussian prior bandwidth
+
+        def prior_assoc(self, L, device):
+            """Learnable-free Gaussian kernel P[i,j] ∝ exp(-|i-j|²/σ²)."""
+            idx = torch.arange(L, device=device).float()
+            P = torch.exp(-((idx.unsqueeze(0) - idx.unsqueeze(1)) ** 2) / self.scale)
+            return P / P.sum(-1, keepdim=True)
+
+        def forward(self, x):  # x: (B, L, d_model)
+            B, L, _ = x.shape
+            QKV = (
+                self.qkv(x)
+                .reshape(B, L, 3, self.n_heads, self.d_head)
+                .permute(2, 0, 3, 1, 4)
+            )
+            Q, K, V = QKV[0], QKV[1], QKV[2]  # (B, H, L, d_head)
+            S = torch.softmax(
+                Q @ K.transpose(-1, -2) / self.d_head**0.5, dim=-1
+            )  # series association
+            P = self.prior_assoc(L, x.device).unsqueeze(0).unsqueeze(0)  # (1, 1, L, L)
+            eps = 1e-8
+            disc = (
+                (
+                    (P * (P + eps).log() - P * (S + eps).log())
+                    + (S * (S + eps).log() - S * (P + eps).log())
+                )
+                .mean(1)
+                .sum(-1)
+            )  # (B, L): KL(P‖S)+KL(S‖P), avg over heads, sum over keys
+            out = self.out((S @ V).transpose(1, 2).reshape(B, L, -1))
+            return out, disc
+
+    class AnomalyTransformer(nn.Module):
+        def __init__(self, win_len=64, d_model=32, n_heads=4, n_layers=2):
+            super().__init__()
+            self.embed = nn.Linear(1, d_model)
+            self.layers = nn.ModuleList(
+                [AnomalyAttention(d_model, n_heads) for _ in range(n_layers)]
+            )
+            self.norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
+            self.recon = nn.Linear(d_model, 1)
+
+        def forward(self, x):  # x: (B, L, 1)
+            h = self.embed(x)
+            total_disc = 0
+            for attn, norm in zip(self.layers, self.norm):
+                delta, disc = attn(h)
+                h = norm(h + delta)
+                total_disc = total_disc + disc
+            return self.recon(h), total_disc / len(self.layers)  # (B,L,1), (B,L)
+
+    return AnomalyAttention, AnomalyTransformer
+
+
+@app.cell
+def _(AnomalyTransformer, data, mo, nn, np, torch):
+    _AT_WIN = 64
+    _pos_at = data.position.astype(np.float32)
+    _n_at = len(_pos_at)
+
+    # All stride-1 windows (~1137 windows for a 1200-sample signal)
+    _at_wins = np.stack(
+        [_pos_at[_i : _i + _AT_WIN] for _i in range(_n_at - _AT_WIN + 1)]
+    )  # (N, 64)
+    # Normalise each window to zero mean / unit std
+    _at_m = _at_wins.mean(1, keepdims=True)
+    _at_s = _at_wins.std(1, keepdims=True) + 1e-8
+    _at_wins_pt = torch.tensor(
+        (_at_wins - _at_m) / _at_s, dtype=torch.float32
+    )  # (N, 64)
+
+    _at = AnomalyTransformer(win_len=_AT_WIN)
+    _opt_at = torch.optim.Adam(_at.parameters(), lr=2e-3)
+
+    _N_EPOCHS_AT = 40
+    _BATCH_AT = 64
+    _at_losses = []
+
+    with mo.status.spinner(
+        f"Training Anomaly Transformer ({_N_EPOCHS_AT} epochs, {len(_at_wins_pt)} windows)…"
+    ):
+        for _ep_at in range(_N_EPOCHS_AT):
+            _at.train()
+            _perm_at = torch.randperm(len(_at_wins_pt))
+            _ep_loss_at, _nb_at = 0.0, 0
+            for _i_at in range(0, len(_perm_at), _BATCH_AT):
+                _b_at = _perm_at[_i_at : _i_at + _BATCH_AT]
+                _x_at = _at_wins_pt[_b_at].unsqueeze(-1)  # (B, 64, 1)
+                _recon_at, _ = _at(_x_at)
+                _loss_at = nn.functional.mse_loss(_recon_at, _x_at)
+                _opt_at.zero_grad()
+                _loss_at.backward()
+                _opt_at.step()
+                _ep_loss_at += float(_loss_at)
+                _nb_at += 1
+            _at_losses.append(_ep_loss_at / max(_nb_at, 1))
+
+    at_model = _at
+    at_win_len = _AT_WIN
+
+    mo.output.replace(
+        mo.callout(
+            mo.md(
+                f"Anomaly Transformer training complete — "
+                f"final MSE: **{_at_losses[-1]:.4f}**"
+            ),
+            kind="success",
+        )
+    )
+    return at_model, at_win_len
+
+
+@app.cell
+def _(at_model, at_win_len, data, find_peaks, gaussian_filter1d, linregress, np, torch):
+    _pos_at_inf = data.position.astype(np.float32)
+    _n_at_inf = len(_pos_at_inf)
+    _n_wins_at = _n_at_inf - at_win_len + 1
+
+    _recon_err_at = np.zeros(_n_at_inf)
+    _disc_at = np.zeros(_n_at_inf)
+    _cnt_at = np.zeros(_n_at_inf, dtype=np.float32)
+
+    at_model.eval()
+    _BATCH_INF_AT = 256
+    with torch.no_grad():
+        for _i_inf_at in range(0, _n_wins_at, _BATCH_INF_AT):
+            _end_inf_at = min(_i_inf_at + _BATCH_INF_AT, _n_wins_at)
+            _bw_at = np.stack(
+                [
+                    _pos_at_inf[_j : _j + at_win_len]
+                    for _j in range(_i_inf_at, _end_inf_at)
+                ]
+            )
+            _bm_at = _bw_at.mean(1, keepdims=True)
+            _bs_at = _bw_at.std(1, keepdims=True) + 1e-8
+            _x_inf_at = torch.tensor(
+                (_bw_at - _bm_at) / _bs_at, dtype=torch.float32
+            ).unsqueeze(-1)
+            _r_inf_at, _d_inf_at = at_model(_x_inf_at)
+            _err_inf_at = (_r_inf_at.squeeze(-1) - _x_inf_at.squeeze(-1)).pow(2).numpy()
+            _d_np_at = _d_inf_at.numpy()
+            for _k_inf_at in range(_end_inf_at - _i_inf_at):
+                _start_k_at = _i_inf_at + _k_inf_at
+                _recon_err_at[_start_k_at : _start_k_at + at_win_len] += _err_inf_at[
+                    _k_inf_at
+                ]
+                _disc_at[_start_k_at : _start_k_at + at_win_len] += _d_np_at[_k_inf_at]
+                _cnt_at[_start_k_at : _start_k_at + at_win_len] += 1
+
+    _cnt_at = np.maximum(_cnt_at, 1)
+    _recon_err_at /= _cnt_at
+    _disc_at /= _cnt_at
+
+    # Normalise to [0,1]; invert disc since low discrepancy = structural break
+    _r_01_at = (_recon_err_at - _recon_err_at.min()) / (
+        _recon_err_at.max() - _recon_err_at.min() + 1e-8
+    )
+    _d_max_at = _disc_at.max()
+    _d_01_inv_at = (_d_max_at - _disc_at) / (_d_max_at - _disc_at.min() + 1e-8)
+    _anomaly_raw_at = 0.5 * _r_01_at + 0.5 * _d_01_inv_at
+
+    at_anomaly_signal = gaussian_filter1d(_anomaly_raw_at, sigma=30)
+    _th_at = at_anomaly_signal.mean() + 0.5 * at_anomaly_signal.std()
+    _pks_at, _ = find_peaks(at_anomaly_signal, height=_th_at, distance=100)
+    at_bkp_times = sorted([_pk * 0.01 for _pk in _pks_at])
+
+    _bkp_idx_at = [int(t / 0.01) for t in at_bkp_times]
+    _seg_bounds_at = [0] + _bkp_idx_at + [_n_at_inf]
+    at_slopes = []
+    for _i_seg_at in range(len(_seg_bounds_at) - 1):
+        _sl_at = _seg_bounds_at[_i_seg_at]
+        _sr_at = _seg_bounds_at[_i_seg_at + 1]
+        if _sr_at - _sl_at < 2:
+            at_slopes.append(float("nan"))
+            continue
+        _lr_at = linregress(data.time[_sl_at:_sr_at], _pos_at_inf[_sl_at:_sr_at])
+        at_slopes.append(float(_lr_at.slope))
+
+    return at_anomaly_signal, at_bkp_times, at_slopes
+
+
+@app.cell(hide_code=True)
+def _(Span, at_anomaly_signal, at_bkp_times, data, figure, plot_results, show):
+    from bokeh.layouts import column as _col_at
+
+    _fig1_at = plot_results(
+        data,
+        "§6 — Anomaly Transformer: detected breakpoints",
+        detected_breakpoints=at_bkp_times,
+    )
+    _p2_at = figure(
+        width=1100,
+        height=200,
+        title="Anomaly score (recon. error + inverted assoc. discrepancy, smoothed σ=30)",
+        x_axis_label="Time (s)",
+        y_axis_label="Score",
+        x_range=_fig1_at.x_range,
+    )
+    _p2_at.line(data.time, at_anomaly_signal, line_color="purple", line_width=1.5)
+    for _bp_at in at_bkp_times:
+        _p2_at.add_layout(
+            Span(
+                location=_bp_at,
+                dimension="height",
+                line_color="red",
+                line_dash="dashed",
+                line_alpha=0.8,
+            )
+        )
+    for _bp_at_t in data.breakpoints:
+        _p2_at.add_layout(
+            Span(
+                location=_bp_at_t,
+                dimension="height",
+                line_color="green",
+                line_dash="dotted",
+                line_alpha=0.5,
+            )
+        )
+    _p2_at.grid.grid_line_alpha = 0.3
+    show(_col_at(_fig1_at, _p2_at), height=900)
+    return
+
+
+@app.cell(hide_code=True)
+def _(at_bkp_times, at_slopes, data, mo):
+    _abs_at_r = [(abs(s), i, s) for i, s in enumerate(at_slopes) if s == s]
+    _abs_at_r.sort(reverse=True)
+    _ramp_slopes_at = [_abs_at_r[0][2], _abs_at_r[1][2]] if len(_abs_at_r) >= 2 else []
+    _ramp_slopes_at.sort()
+
+    _rows_at = ""
+    for _i_at_r, (_det_at, _true_at) in enumerate(zip(at_bkp_times, data.breakpoints)):
+        _err_at = abs(_det_at - _true_at)
+        _rows_at += f"| BP {_i_at_r + 1} | {_true_at:.3f} s | {_det_at:.3f} s | {_err_at:.3f} s |\n"
+
+    _slope_rows_at = ""
+    for _i_at_r, (_det_s_at, _true_s_at) in enumerate(
+        zip(_ramp_slopes_at, data.slopes)
+    ):
+        _slope_rows_at += (
+            f"| Ramp {_i_at_r + 1} | {_true_s_at:.2f} | {_det_s_at:.2f} | "
+            f"{abs(_det_s_at - _true_s_at):.2f} |\n"
+        )
+
+    mo.callout(
+        mo.md(
+            f"""**Anomaly Transformer result**
+
+### Breakpoints
+
+| | True | Detected | Error |
+|---|---|---|---|
+{_rows_at}
+### Ramp slopes (%/s)
+
+| | True | Detected | Error |
+|---|---|---|---|
+{_slope_rows_at}"""
+        ),
+        kind="info",
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
     mo.md("""
-    ## §5 — Results summary
+    ## §7 — Results summary
     """)
     return
 
@@ -704,7 +1306,7 @@ def _(data, mo, moment_bkp_times, moment_slopes):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## §6 — Discussion
+    ## §8 — Discussion
 
     ### What worked
     - Fine-tuning a **small Conv1D head** (≈ 130 k parameters) on top of **frozen
@@ -741,6 +1343,8 @@ def _(mo):
     | MOMENT zero-shot | ✗ | ✗ | None |
     | **MOMENT fine-tuned head** | **✓✓** | **✓✓✓** | **~60 epochs, synthetic** |
     | MOMENT full fine-tune | ✓✓✓ (expected) | ✓✓✓ (expected) | More epochs, GPU recommended |
+    | **TCDformer LLSA** | **✓✓** | **✓✓** | **~60 epochs, synthetic** |
+    | **Anomaly Transformer** | **✓** | **✓** | **~40 epochs, unsupervised** |
 
     The fine-tuned MOMENT head is not yet competitive with classical methods in accuracy,
     but it is the *only* approach here that learns from data and generalises across
