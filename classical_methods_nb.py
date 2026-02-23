@@ -73,6 +73,31 @@ def _(generate_synthetic_data):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## Method 0 — Direct Curve Fit (scipy)
+    *Library:* `scipy.optimize.curve_fit` &nbsp;|&nbsp; *Simplest and fastest; standard errors on slopes for free*
+    """)
+    return
+
+
+@app.cell
+def _(data, importlib, plot_results, show):
+    _m = importlib.import_module("gate_analysis.0_curve_fit")
+    _result = _m.curve_fit_piecewise(data.time, data.position)
+    _segs = _m._build_segments(data, _result)
+    _fig = plot_results(
+        data,
+        "Method 0: Direct Curve Fit (scipy)",
+        fitted_segments=_segs,
+        detected_breakpoints=_result["breakpoints"],
+        estimated_slopes=_result["slopes"],
+    )
+    show(_fig)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Method 1 — Segmented Regression (Muggeo)
     *Library:* `piecewise-regression` &nbsp;|&nbsp; *Best accuracy / speed trade-off*
     """)

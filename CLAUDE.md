@@ -24,20 +24,20 @@ uv run ruff format src/
 uv run ty check src/
 ```
 
-Replace `1_segmented_regression` with any of the 6 module names.
+Replace `1_segmented_regression` with any of the 7 module names.
 
 ## Architecture
 
-This is a demo/research project (Python 3.13, managed with `uv`) that implements and compares six methods for detecting breakpoints and measuring slopes in pipe gate closing signals.
+This is a demo/research project (Python 3.13, managed with `uv`) that implements and compares seven methods for detecting breakpoints and measuring slopes in pipe gate closing signals.
 
 **Package layout:** `src/gate_analysis/` (src layout, installed as editable via `uv_build`).
 
-**`common.py`** is the shared foundation used by all six demo scripts:
+**`common.py`** is the shared foundation used by all demo scripts:
 - `GateData` dataclass holds `time`, `position` arrays plus ground-truth `breakpoints`, `slopes`, `plateaus`.
 - `generate_synthetic_data()` produces the canonical 1200-sample test signal (dt=0.01s, seed=42) with breakpoints at 2.0, 5.0, 9.0 s and slopes of -25.0 and -5.0 %/s.
 - `plot_results()` renders raw data with optional fitted segments, detected breakpoints, and slope annotations.
 
-**Each numbered script** (`1_…` through `6_…`) is self-contained and follows the same pattern:
+**Each numbered script** (`0_…` through `6_…`) is self-contained and follows the same pattern:
 1. Call `generate_synthetic_data()` from `common.py`
 2. Run the method-specific analysis
 3. Call `plot_results()` and either save or display the figure
@@ -49,6 +49,7 @@ This is a demo/research project (Python 3.13, managed with `uv`) that implements
 
 | # | File | Library | Accuracy |
 |---|------|---------|----------|
+| 0 | `0_curve_fit.py` | `scipy.optimize` | Best accuracy + speed; requires known topology |
 | 1 | `1_segmented_regression.py` | `piecewise-regression` | Best accuracy/speed trade-off |
 | 2 | `2_bayesian_changepoint.py` | `pymc` (NUTS MCMC) | Best UQ, ~5 min runtime |
 | 3 | `3_cpop_piecewise_linear.py` | numpy only (DP + BIC) | Accurate, ~4 s |

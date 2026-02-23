@@ -22,6 +22,19 @@ slopes of -25.0 and -5.0 %/s; Gaussian noise with 1% std).
 
 ## Classical methods
 
+### 0. Direct Curve Fit (`0_curve_fit.py`)
+
+**Library:** `scipy.optimize` (numpy only)
+
+Fits the known 4-piece piecewise linear model directly using
+`scipy.optimize.curve_fit` (Trust Region Reflective algorithm). Because the
+signal topology — high plateau → fast ramp → slow ramp → low plateau — is
+fully known in advance, the model has exactly 6 free parameters (`t1`, `t2`,
+`t3`, `v_high`, `a1`, `a2`). No model selection is needed. The covariance
+matrix returned by `curve_fit` provides standard errors on all parameters,
+including slopes, at negligible extra cost. This is the simplest approach
+when the signal structure is known, and typically the fastest.
+
 ### 1. Segmented Regression (`1_segmented_regression.py`)
 
 **Library:** `piecewise-regression` (Python port of Muggeo's 2003 iterative
@@ -107,6 +120,7 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 
 | # | Method | Breakpoints (s) | Fast slope (%/s) | Slow slope (%/s) | Time |
 |---|--------|-----------------|-------------------|-------------------|------|
+| 0 | Direct curve fit (scipy) | 2.000, 5.003, 9.165 | -24.99 | -5.02 | <1 s |
 | 1 | Segmented regression | 2.000, 5.003, 9.145 | -24.99 | -5.03 | ~2 s |
 | 2 | Bayesian changepoint | 2.003, 4.985, 9.257 | -25.20 | -4.96 | ~5 min |
 | 3 | CPOP piecewise linear | 1.980, 5.040, 9.180 | -24.79 | -4.96 | ~4 s |
@@ -118,6 +132,12 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 
 ### Observations
 
+- **Option 0** (direct curve fit) achieves near-exact results (~0.01 %/s
+  error) in under a millisecond by exploiting full knowledge of the signal
+  topology. It also provides standard errors on slopes directly from the
+  covariance matrix (e.g. fast slope: −24.99 ± 0.07 %/s). The only caveat
+  is that convergence depends on a reasonable initial guess, which is easy to
+  supply when the signal structure is known.
 - **Options 1-3** produce accurate slope estimates (within 1% of true values)
   and good breakpoint detection. These are model-based approaches that fit
   the known piecewise-linear structure directly.
