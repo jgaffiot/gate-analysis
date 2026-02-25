@@ -111,7 +111,7 @@ def _(data, importlib, plot_results, show):
     _segs = _m._build_segments(data, _result)
     _fig = plot_results(
         data,
-        "Option A: Segmented Regression (Muggeo)",
+        "Method 1: Segmented Regression (Muggeo)",
         fitted_segments=_segs,
         detected_breakpoints=_result["breakpoints"],
         estimated_slopes=_result["slopes"],
@@ -136,7 +136,7 @@ def _(data, importlib, plot_results, show):
     _segs = _m._build_segments(data, _result)
     _fig = plot_results(
         data,
-        "Option B: Bayesian Change-Point Model (PyMC + ADVI)",
+        "Method 2: Bayesian Change-Point Model (PyMC + ADVI)",
         fitted_segments=_segs,
         detected_breakpoints=_result["breakpoints"],
         estimated_slopes=_result["slopes"],
@@ -161,7 +161,7 @@ def _(data, importlib, plot_results, show):
     _segs = _m._build_segments(data, _result)
     _fig = plot_results(
         data,
-        "Option C: CPOP-like Continuous Piecewise Linear",
+        "Method 3: CPOP-like Continuous Piecewise Linear",
         fitted_segments=_segs,
         detected_breakpoints=_result["breakpoints"],
         estimated_slopes=_result["slopes"],
@@ -186,7 +186,7 @@ def _(data, importlib, plot_results, show):
     _segs = _m._build_segments(data, _result)
     _fig = plot_results(
         data,
-        "Option D: ruptures + OLS",
+        "Method 4: ruptures + OLS",
         fitted_segments=_segs,
         detected_breakpoints=_result["breakpoints"],
         estimated_slopes=_result["slopes"],

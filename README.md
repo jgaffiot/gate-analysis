@@ -134,7 +134,7 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 
 | # | Method | Breakpoints (s) | Fast slope (%/s) | Slow slope (%/s) | Time |
 |---|--------|-----------------|-------------------|-------------------|------|
-| 0 | Direct curve fit (scipy) | 2.000, 5.003, 9.165 | -24.99 | -5.02 | <1 s |
+| 0 | Direct curve fit (scipy) | 2.000, 5.003, 9.165 | -24.99 | -5.02 | <1 ms |
 | 1 | Segmented regression | 2.000, 5.003, 9.145 | -24.99 | -5.03 | ~0.9 s |
 | 2 | Bayesian MAP + Laplace | 1.999, 5.004, 8.980 | -24.98 | -5.01 | ~0.25 s |
 | 3 | CPOP piecewise linear | 1.980, 5.040, 9.180 | -24.79 | -4.96 | ~2 s (~0.3 s with n_breakpoints=3) |
@@ -146,24 +146,24 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 
 ### Observations
 
-- **Option 0** (direct curve fit) achieves near-exact results (~0.01 %/s
+- **Method 0** (direct curve fit) achieves near-exact results (~0.01 %/s
   error) in under a millisecond by exploiting full knowledge of the signal
   topology. It also provides standard errors on slopes directly from the
   covariance matrix (e.g. fast slope: −24.99 ± 0.07 %/s). The only caveat
   is that convergence depends on a reasonable initial guess, which is easy to
   supply when the signal structure is known.
-- **Options 1-3** produce accurate slope estimates (within 1% of true values)
+- **Methods 1–3** produce accurate slope estimates (within 1% of true values)
   and good breakpoint detection. These are model-based approaches that fit
   the known piecewise-linear structure directly.
-- **Option 4** (ruptures) finds the fast slope well but misplaces breakpoints
+- **Method 4** (ruptures) finds the fast slope well but misplaces breakpoints
   and overestimates the slow slope, because the L2 cost function detects
   mean shifts rather than slope changes. Using `model="clinear"` (continuous
   piecewise linear) would improve this.
-- **Option 5** (SG derivative) is a signal-processing approach relying on
+- **Method 5** (SG derivative) is a signal-processing approach relying on
   heuristic thresholds for regime detection. It correctly identifies the
   general shape but is less precise on breakpoint locations and slope
   magnitude, and would benefit from parameter tuning.
-- **Option 6** (adaptive Kalman) replaces the original heuristic velocity
+- **Method 6** (adaptive Kalman) replaces the original heuristic velocity
   threshold with a principled CUSUM test on the Normalized Innovation Squared.
   The filter is restarted at each detected changepoint, enabling near-instant
   re-convergence to the new slope. Combined with OLS per segment, slope
@@ -172,15 +172,15 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
   The third breakpoint (end of closing) is slightly overestimated (~9.55 vs
   9.00 s) because the CUSUM needs a few plateau samples to accumulate; this
   is a known detection-delay artefact of CUSUM-based methods.
-- **Option 2** (Bayesian) is the only one providing principled credible
-  intervals (e.g., fast slope 95% CI: [-25.39, -24.98] %/s), but is
-  ~150x slower than option 1.
-- **Option 8** (NOT) achieves accuracy on par with options 1–3 while
+- **Method 2** (Bayesian) is the only one providing principled credible
+  intervals (e.g., fast slope 95% CI: [-25.39, -24.98] %/s). At ~0.25 s it
+  is ~250× slower than method 0 but faster than method 1.
+- **Method 8** (NOT) achieves accuracy on par with methods 1–3 while
   requiring no prior knowledge of the number of breakpoints. The
   narrowest-first rule makes it robust when change points are closely spaced.
   The Bonferroni-calibrated threshold provides statistical control over false
   positives.
-- For batch processing many closing events, **option 1** (segmented
+- For batch processing many closing events, **method 1** (segmented
   regression) offers the best accuracy/speed trade-off.
 
 ## Usage
@@ -198,7 +198,7 @@ MPLBACKEND=Agg uv run python -m gate_analysis.1_segmented_regression
 uv run python -m gate_analysis.1_segmented_regression
 ```
 
-Replace `1_segmented_regression` with any of the 7 module names above.
+Replace `1_segmented_regression` with any of the 8 module names above.
 
 ### Notebook (`classical_methods_nb.py`)
 

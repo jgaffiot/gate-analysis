@@ -1,4 +1,4 @@
-"""Option E: Savitzky-Golay derivative + threshold detection.
+"""Method 5: Savitzky-Golay derivative + threshold detection.
 
 Uses a Savitzky-Golay filter to compute a smoothed first derivative of the
 signal, then detects regime transitions by thresholding the derivative.
@@ -104,7 +104,7 @@ def savitzky_golay(
 
     breakpoints = [t_start_closing, t_slope_change, t_end_closing]
 
-    print("=== Option E: Savitzky-Golay Derivative + Threshold ===")
+    print("=== Method 5: Savitzky-Golay Derivative + Threshold ===")
     print(f"SG params: window={window_length}, polyorder={polyorder}")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints]}")
     print(f"Fast slope (median derivative): {slope_fast:.2f} %/s")
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     p1 = figure(
         width=1200,
         height=400,
-        title="Option E: Savitzky-Golay Derivative + Threshold",
+        title="Method 5: Savitzky-Golay Derivative + Threshold",
         y_axis_label="Gate position (%)",
     )
     p1.scatter(

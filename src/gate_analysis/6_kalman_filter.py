@@ -1,4 +1,4 @@
-"""Option 6: Adaptive Kalman filter with innovation-based changepoint detection.
+"""Method 6: Adaptive Kalman filter with innovation-based changepoint detection.
 
 Uses a constant-velocity Kalman filter (filterpy). Changepoints are detected
 online by monitoring a CUSUM test on the Normalized Innovation Squared (NIS).
@@ -166,7 +166,7 @@ def kalman_adaptive(
     slope_fast = closing_segs[0]["slope"] if len(closing_segs) >= 1 else float("nan")
     slope_slow = closing_segs[1]["slope"] if len(closing_segs) >= 2 else float("nan")
 
-    print("=== Option 6: Adaptive Kalman Filter (CUSUM + restart) ===")
+    print("=== Method 6: Adaptive Kalman Filter (CUSUM + restart) ===")
     print(f"KF params: R={measurement_noise:.2f}, Q_var={process_noise:.2f}")
     print(f"CUSUM params: slack={cusum_slack}, threshold={cusum_threshold}")
     print(f"Detected changepoints: {len(changepoint_indices)}")
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     p1 = figure(
         width=1200,
         height=380,
-        title="Option 6: Adaptive Kalman Filter (CUSUM + restart)",
+        title="Method 6: Adaptive Kalman Filter (CUSUM + restart)",
         y_axis_label="Gate position (%)",
     )
     p1.scatter(data.time, data.position, color="gray", alpha=0.3, size=2)

@@ -1,4 +1,4 @@
-"""Option H: Narrowest-Over-Threshold (NOT) change-point detection.
+"""Method 8: Narrowest-Over-Threshold (NOT) change-point detection.
 
 Python reimplementation of the NOT algorithm (Baranowski, Chen & Fryzlewicz,
 2019, JRSS-B 81(3):649-672) adapted for kink detection (change in slope) in
@@ -234,7 +234,7 @@ def not_detection(
         slopes.append(float(lr.slope))
         fitted[sl:sr] = lr.intercept + lr.slope * time[sl:sr]
 
-    print("=== Option H: Narrowest-Over-Threshold (NOT) ===")
+    print("=== Method 8: Narrowest-Over-Threshold (NOT) ===")
     print(f"Noise estimate: {sigma_noise:.3f} %,  threshold: {threshold:.1f}")
     print(f"Significant sub-intervals: {len(significant)} / {n_intervals}")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints_t]}")
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     segments = _build_segments(data, result)
     fig = plot_results(
         data,
-        "Option H: Narrowest-Over-Threshold (NOT)",
+        "Method 8: Narrowest-Over-Threshold (NOT)",
         fitted_segments=segments,
         detected_breakpoints=result["breakpoints"],
         estimated_slopes=result["slopes"],

@@ -1,4 +1,4 @@
-"""Option A: Segmented regression using the piecewise-regression package.
+"""Method 1: Segmented regression using the piecewise-regression package.
 
 Uses Muggeo's iterative method to fit a piecewise-linear model with
 automatically estimated breakpoints and slopes, including confidence intervals.
@@ -65,7 +65,7 @@ def segmented_regression(
     # Keep only the two closing slopes for reporting (consistent with other methods)
     slopes = all_slopes[1:3]
 
-    print("=== Option A: Segmented Regression (Muggeo) ===")
+    print("=== Method 1: Segmented Regression (Muggeo) ===")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints]}")
     print(f"Slopes: {[f'{s:.2f}' for s in slopes]}")
     model.summary()
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     segments = _build_segments(data, result)
     fig = plot_results(
         data,
-        "Option A: Segmented Regression (Muggeo)",
+        "Method 1: Segmented Regression (Muggeo)",
         fitted_segments=segments,
         detected_breakpoints=result["breakpoints"],
         estimated_slopes=result["slopes"],

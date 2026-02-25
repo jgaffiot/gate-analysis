@@ -1,4 +1,4 @@
-"""Option D: Change-point detection with ruptures + OLS slope estimation.
+"""Method 4: Change-point detection with ruptures + OLS slope estimation.
 
 Uses the ruptures library for segmentation (PELT or Dynp with a linear cost
 model), then fits OLS on each segment to estimate slopes with confidence
@@ -116,7 +116,7 @@ def ruptures_ols(
 
     estimated_slopes = [segments_info[i]["slope"] for i in ramp_indices]
 
-    print("=== Option D: ruptures + OLS ===")
+    print("=== Method 4: ruptures + OLS ===")
     print(f"Change points (indices): {bp_indices}")
     print(f"Breakpoints (time): {[f'{bp:.3f}' for bp in breakpoints]}")
     for i, seg in enumerate(segments_info):
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     segments = _build_segments(data, result)
     fig = plot_results(
         data,
-        "Option D: ruptures + OLS",
+        "Method 4: ruptures + OLS",
         fitted_segments=segments,
         detected_breakpoints=result["breakpoints"],
         estimated_slopes=result["slopes"],

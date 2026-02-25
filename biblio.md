@@ -6,7 +6,7 @@ Accurately measuring the two closing slopes (fast then slow) of a pipe gate
 from noisy sensor data (position in % vs. time), in order to track mechanical
 aging (slope flattening over time).
 
-The signal has **five phases**: constant high plateau (~100%), fast linear
+The signal has **four phases**: constant high plateau (~100%), fast linear
 closing, slow linear closing, constant low plateau (~0%), with additive sensor
 noise throughout and possible calibration offsets on the plateaus.
 

@@ -1,4 +1,4 @@
-"""Option C: CPOP-like continuous piecewise-linear segmentation with L0 penalty.
+"""Method 3: CPOP-like continuous piecewise-linear segmentation with L0 penalty.
 
 Custom dynamic-programming implementation inspired by Fearnhead et al. (2019).
 Finds the optimal continuous piecewise-linear fit minimizing residual sum of
@@ -175,7 +175,7 @@ def cpop_piecewise_linear(
 
     breakpoints = [float(time[i]) for i in best_result["breakpoint_indices"]]
 
-    print("=== Option C: CPOP-like Continuous Piecewise Linear (L0 penalty) ===")
+    print("=== Method 3: CPOP-like Continuous Piecewise Linear (L0 penalty) ===")
     print(f"Selected {best_result['n_breakpoints']} breakpoints")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints]}")
     print(f"Slopes: {[f'{s:.2f}' for s in best_result['slopes']]}")
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     segments = _build_segments(data, result)
     fig = plot_results(
         data,
-        "Option C: CPOP-like Continuous Piecewise Linear",
+        "Method 3: CPOP-like Continuous Piecewise Linear",
         fitted_segments=segments,
         detected_breakpoints=result["breakpoints"],
         estimated_slopes=result["slopes"],
