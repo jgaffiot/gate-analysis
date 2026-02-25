@@ -99,16 +99,19 @@ transition is found by splitting on derivative magnitude. Slopes are estimated
 as the median derivative in each sub-region. Simple and fast, but no formal
 statistical inference.
 
-### 6. Kalman Filter with Regime Detection (`6_kalman_filter.py`)
+### 6. Adaptive Kalman Filter with CUSUM Restart (`6_kalman_filter.py`)
 
-**Library:** `filterpy`
+**Library:** `filterpy`, `scipy.stats`
 
-Sets up a constant-velocity Kalman filter (state = [position, velocity]) to
-optimally estimate the instantaneous slope at each time step. Regime
-transitions are detected from the filtered velocity signal using the same
-threshold/split heuristic as option 5. Provides online-capable processing,
-but the heuristic regime splitting limits accuracy compared to model-based
-approaches.
+Sets up a constant-velocity Kalman filter (state = [position, velocity]).
+Instead of post-hoc heuristic thresholding, changepoints are detected
+**online** using a CUSUM test on the Normalized Innovation Squared (NIS =
+innovation² / S). The NIS follows a chi²(1) distribution (mean = 1) when
+the filter model matches the data; a sustained excess signals a slope change.
+When the CUSUM exceeds its threshold, the velocity covariance is inflated at
+the estimated changepoint, forcing rapid re-adaptation to the new slope within
+a few samples. Slopes are then estimated by OLS on each detected segment,
+giving much more accurate results than the filtered-velocity median heuristic.
 
 ### 8. NOT — Narrowest-Over-Threshold (`8_not_detection.py`)
 
@@ -137,7 +140,7 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
 | 3 | CPOP piecewise linear | 1.980, 5.040, 9.180 | -24.79 | -4.96 | ~2 s (~0.3 s with n_breakpoints=3) |
 | 4 | ruptures + OLS | 2.850, 4.300, 6.900 | -25.18 | -8.64 | ~1 s |
 | 5 | Savitzky-Golay | 0.390, 5.000, 11.990 | -22.67 | -3.41 | ~1 s |
-| 6 | Kalman filter | 0.040, 8.010, 11.800 | -11.91 | -4.78 | ~1 s |
+| 6 | Kalman adaptive (CUSUM restart) | 2.040, 5.060, 9.550 | -24.99 | -4.94 | ~0.05 s |
 | 8 | NOT | 2.030, 5.040, 9.100 | -24.99 | -5.05 | ~1 s |
 | | **Ground truth** | **2.000, 5.000, 9.000** | **-25.00** | **-5.00** | |
 
@@ -156,11 +159,19 @@ seed=42). Ground truth: breakpoints at **2.0, 5.0, 9.0 s**, slopes
   and overestimates the slow slope, because the L2 cost function detects
   mean shifts rather than slope changes. Using `model="clinear"` (continuous
   piecewise linear) would improve this.
-- **Options 5-6** (SG derivative and Kalman) are signal-processing approaches
-  that rely on heuristic thresholds for regime detection. They correctly
-  identify the general shape but are less precise on breakpoint locations
-  and slope magnitude. Both would benefit from tuning their parameters to
-  the specific signal characteristics.
+- **Option 5** (SG derivative) is a signal-processing approach relying on
+  heuristic thresholds for regime detection. It correctly identifies the
+  general shape but is less precise on breakpoint locations and slope
+  magnitude, and would benefit from parameter tuning.
+- **Option 6** (adaptive Kalman) replaces the original heuristic velocity
+  threshold with a principled CUSUM test on the Normalized Innovation Squared.
+  The filter is restarted at each detected changepoint, enabling near-instant
+  re-convergence to the new slope. Combined with OLS per segment, slope
+  accuracy improves from ~(-11.91, -4.78) to ~(-24.99, -4.94) %/s — on par
+  with the model-based methods — while being the fastest approach (~50 ms).
+  The third breakpoint (end of closing) is slightly overestimated (~9.55 vs
+  9.00 s) because the CUSUM needs a few plateau samples to accumulate; this
+  is a known detection-delay artefact of CUSUM-based methods.
 - **Option 2** (Bayesian) is the only one providing principled credible
   intervals (e.g., fast slope 95% CI: [-25.39, -24.98] %/s), but is
   ~150x slower than option 1.
