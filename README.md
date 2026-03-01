@@ -1,4 +1,6 @@
-# Gate Analysis -- Pipe Gate Closing Curve Analysis Demos
+# Gate Analysis Demos
+
+**[Live notebook →](https://jgaffiot.github.io/gate-analysis/)**
 
 ## Goal
 
