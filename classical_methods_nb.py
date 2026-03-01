@@ -299,7 +299,7 @@ def _(mo):
 @app.cell
 def _(Label, Span, bk_figure, column, data, importlib, show):
     _m = importlib.import_module("gate_analysis.6_kalman_filter")
-    _r = _m.kalman_filter(data.time, data.position)
+    _r = _m.kalman_adaptive(data.time, data.position)
 
     _p1 = bk_figure(
         width=1100,
