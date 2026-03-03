@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "jgaffiot", email = "j.gaffiot@laposte.net" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11.0"
 dependencies = [
     "numpy",
     "bokeh",
@@ -16,13 +16,11 @@ dependencies = [
     "ruptures",
     "filterpy",
     "marimo>=0.19.11",
-
 ]
 
 [dependency-groups]
 dev = [
     "ruff",
-    "setuptools>=82.0.0",
     "ty",
 ]
 transformer = [
