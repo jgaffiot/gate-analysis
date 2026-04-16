@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import polars as pl
 from bokeh.models import Label, Span
 from bokeh.palettes import Category10
 from bokeh.plotting import figure
@@ -14,14 +16,32 @@ from bokeh.plotting import figure
 
 @dataclass
 class GateData:
-    """Container for synthetic gate closing data with ground-truth parameters."""
+    """Container for gate closing data with ground-truth parameters.
 
-    time: npt.NDArray[np.floating[Any]]
-    position: npt.NDArray[np.floating[Any]]
+    The DataFrame ``df`` has a ``date_time`` column (:pyclass:`Datetime("us")`)
+    and one or more gate position columns.  Ground-truth parameters are shared
+    across gates in synthetic data.
+    """
+
+    df: pl.DataFrame
     # Ground-truth parameters
     breakpoints: list[float] = field(default_factory=list)
     slopes: list[float] = field(default_factory=list)
     plateaus: tuple[float, float] = (98.0, 2.0)
+
+    @property
+    def gate_columns(self) -> list[str]:
+        """Names of gate position columns (everything except ``date_time``)."""
+        return [c for c in self.df.columns if c != "date_time"]
+
+    @property
+    def time(self) -> npt.NDArray[np.floating[Any]]:
+        """Elapsed time in seconds from the first timestamp."""
+        dt_col = self.df["date_time"]
+        durations = dt_col - dt_col[0]
+        return (
+            durations.dt.total_microseconds().cast(pl.Float64) / 1_000_000.0
+        ).to_numpy()
 
 
 def generate_synthetic_data(
@@ -36,6 +56,8 @@ def generate_synthetic_data(
     slope_fast: float = -25.0,
     slope_slow: float = -5.0,
     noise_std: float = 1.0,
+    n_gates: int = 2,
+    start_datetime: datetime | None = None,
     seed: int = 42,
 ) -> GateData:
     """Generate a realistic synthetic gate closing signal.
@@ -46,36 +68,62 @@ def generate_synthetic_data(
     3. Slow linear closing (gentle negative slope)
     4. Low plateau (~plateau_low%)
 
-    The slopes are given in %/s. Default fast slope is -25%/s and slow is -5%/s.
-    The breakpoint between fast and slow closing is at t_slope_change.
+    Parameters
+    ----------
+    n_gates : int
+        Number of gate columns to generate (default 2).  Each gate receives
+        slightly perturbed slopes (±5 %) and noise (±10 %).
+    start_datetime : datetime or None
+        Start timestamp for the ``date_time`` column.  Defaults to
+        ``datetime(2024, 1, 1)``.
     """
     rng = np.random.default_rng(seed)
-    time = np.arange(0, t_total, dt)
-    position = np.empty_like(time)
 
-    # Compute position values at breakpoints for continuity
-    pos_at_start = plateau_high
-    pos_at_slope_change = pos_at_start + slope_fast * (t_slope_change - t_start_closing)
+    if start_datetime is None:
+        start_datetime = datetime(2024, 1, 1)
 
-    for i, t in enumerate(time):
-        if t < t_start_closing:
-            position[i] = plateau_high
-        elif t < t_slope_change:
-            position[i] = pos_at_start + slope_fast * (t - t_start_closing)
-        elif t < t_end_closing:
-            position[i] = pos_at_slope_change + slope_slow * (t - t_slope_change)
-        else:
-            position[i] = plateau_low
+    time_arr = np.arange(0, t_total, dt)
 
-    # Clamp to physical range before adding noise
-    position = np.clip(position, plateau_low, plateau_high)
+    # Build datetime column
+    date_times = [start_datetime + timedelta(seconds=float(t)) for t in time_arr]
 
-    # Add sensor noise
-    position = position + rng.normal(0, noise_std, size=position.shape)
+    # Build gate columns with slightly perturbed parameters
+    gate_data: dict[str, npt.NDArray[np.floating[Any]]] = {}
+    for g in range(n_gates):
+        slope_fast_g = slope_fast * (1.0 + 0.05 * rng.standard_normal())
+        slope_slow_g = slope_slow * (1.0 + 0.05 * rng.standard_normal())
+        noise_std_g = noise_std * (1.0 + 0.1 * abs(rng.standard_normal()))
+
+        pos_at_start = plateau_high
+        pos_at_slope_change = pos_at_start + slope_fast_g * (
+            t_slope_change - t_start_closing
+        )
+
+        position = np.where(
+            time_arr < t_start_closing,
+            plateau_high,
+            np.where(
+                time_arr < t_slope_change,
+                pos_at_start + slope_fast_g * (time_arr - t_start_closing),
+                np.where(
+                    time_arr < t_end_closing,
+                    pos_at_slope_change + slope_slow_g * (time_arr - t_slope_change),
+                    plateau_low,
+                ),
+            ),
+        )
+
+        position = np.clip(position, plateau_low, plateau_high)
+        position = position + rng.normal(0, noise_std_g, size=position.shape)
+
+        gate_data[f"gate_{g}"] = position
+
+    df = pl.DataFrame({"date_time": date_times, **gate_data}).cast(
+        {"date_time": pl.Datetime("us")}
+    )
 
     return GateData(
-        time=time,
-        position=position,
+        df=df,
         breakpoints=[t_start_closing, t_slope_change, t_end_closing],
         slopes=[slope_fast, slope_slow],
         plateaus=(plateau_high, plateau_low),
@@ -86,14 +134,19 @@ def plot_results(
     data: GateData,
     title: str,
     *,
-    fitted_segments: list[
-        tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]
+    fitted_segments: dict[
+        str,
+        list[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]],
     ]
     | None = None,
-    detected_breakpoints: list[float] | None = None,
-    estimated_slopes: list[float] | None = None,
+    detected_breakpoints: dict[str, list[float]] | None = None,
+    estimated_slopes: dict[str, list[float]] | None = None,
 ) -> figure:
-    """Plot the raw data with optional fitted segments and detected breakpoints."""
+    """Plot raw data for all gates with optional fitted segments and breakpoints.
+
+    Parameters are dicts keyed by gate column name to support multi-gate
+    overlay on a single figure.
+    """
     fig = figure(
         width=1200,
         height=600,
@@ -102,49 +155,55 @@ def plot_results(
         y_axis_label="Gate position (%)",
     )
 
-    fig.scatter(
-        data.time,
-        data.position,
-        marker="circle",
-        color="gray",
-        alpha=0.3,
-        size=2,
-        legend_label="Raw data",
-    )
-
     colors = Category10[10]
-    if fitted_segments:
-        for i, (t_seg, y_seg) in enumerate(fitted_segments):
-            fig.line(
-                t_seg,
-                y_seg,
-                line_width=2,
-                color=colors[i % 10],
-                legend_label=f"Segment {i}",
-            )
+    time = data.time
 
-    if detected_breakpoints:
-        for bp in detected_breakpoints:
-            fig.add_layout(
-                Span(
-                    location=bp,
-                    dimension="height",
-                    line_color="red",
-                    line_dash="dashed",
-                    line_alpha=0.7,
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        position = data.df[col].to_numpy()
+
+        # Raw data scatter
+        fig.scatter(
+            time,
+            position,
+            marker="circle",
+            color=color,
+            alpha=0.2,
+            size=2,
+            legend_label=col,
+        )
+
+        # Fitted segments
+        if fitted_segments and col in fitted_segments:
+            for i, (t_seg, y_seg) in enumerate(fitted_segments[col]):
+                kw: dict[str, Any] = {"line_width": 2, "color": color}
+                if i == 0:
+                    kw["legend_label"] = f"{col} fit"
+                fig.line(t_seg, y_seg, **kw)
+
+        # Detected breakpoints
+        if detected_breakpoints and col in detected_breakpoints:
+            for bp in detected_breakpoints[col]:
+                fig.add_layout(
+                    Span(
+                        location=bp,
+                        dimension="height",
+                        line_color=color,
+                        line_dash="dashed",
+                        line_alpha=0.7,
+                    )
                 )
-            )
-            # Invisible glyph to register a legend entry for this breakpoint
+            # Single legend entry for this gate's breakpoints
             fig.line(
                 [],
                 [],
-                line_color="red",
+                line_color=color,
                 line_dash="dashed",
                 line_alpha=0.7,
-                legend_label=f"BP @ {bp:.2f}s",
+                legend_label=f"{col} BPs",
             )
 
-    # Ground truth breakpoints (no legend entry)
+    # Ground truth breakpoints (shared across gates)
     for bp in data.breakpoints:
         fig.add_layout(
             Span(
@@ -156,10 +215,11 @@ def plot_results(
             )
         )
 
-    info_parts = []
+    info_parts: list[str] = []
     if estimated_slopes:
-        for i, s in enumerate(estimated_slopes):
-            info_parts.append(f"Slope {i + 1}: {s:.2f} %/s")
+        for col, slopes in estimated_slopes.items():
+            for i, s in enumerate(slopes):
+                info_parts.append(f"{col} slope {i + 1}: {s:.2f} %/s")
     info_parts.append(f"True slopes: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s")
 
     fig.add_layout(
@@ -186,7 +246,8 @@ if __name__ == "__main__":
     from bokeh.io import show
 
     data = generate_synthetic_data()
-    print(f"Generated {len(data.time)} samples")
+    print(f"Generated {len(data.df)} samples, {len(data.gate_columns)} gates")
+    print(f"Gate columns: {data.gate_columns}")
     print(f"True breakpoints: {data.breakpoints}")
     print(f"True slopes: {data.slopes}")
     fig = plot_results(data, "Synthetic Gate Closing Data")

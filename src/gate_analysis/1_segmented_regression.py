@@ -93,17 +93,34 @@ def _build_segments(
     return segments
 
 
+def analyze(
+    data: GateData,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Run segmented regression on all gate columns.
+
+    Returns (results, segments) dicts keyed by gate column name.
+    """
+    time = data.time
+    results: dict[str, dict[str, Any]] = {}
+    segments: dict[str, Any] = {}
+    for col in data.gate_columns:
+        position = data.df[col].to_numpy()
+        r = segmented_regression(time, position)
+        results[col] = r
+        segments[col] = _build_segments(data, r)
+    return results, segments
+
+
 if __name__ == "__main__":
     from bokeh.io import show
 
     data = generate_synthetic_data()
-    result = segmented_regression(data.time, data.position)
-    segments = _build_segments(data, result)
+    results, segments = analyze(data)
     fig = plot_results(
         data,
         "Method 1: Segmented Regression (Muggeo)",
         fitted_segments=segments,
-        detected_breakpoints=result["breakpoints"],
-        estimated_slopes=result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in results.items()},
     )
     show(fig)

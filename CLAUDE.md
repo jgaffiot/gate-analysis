@@ -33,15 +33,14 @@ This is a demo/research project (Python 3.13, managed with `uv`) that implements
 **Package layout:** `src/gate_analysis/` (src layout, installed as editable via `uv_build`).
 
 **`common.py`** is the shared foundation used by all demo scripts:
-- `GateData` dataclass holds `time`, `position` arrays plus ground-truth `breakpoints`, `slopes`, `plateaus`.
-- `generate_synthetic_data()` produces the canonical 1200-sample test signal (dt=0.01s, seed=42) with breakpoints at 2.0, 5.0, 9.0 s and slopes of -25.0 and -5.0 %/s.
-- `plot_results()` renders raw data with optional fitted segments, detected breakpoints, and slope annotations.
+- `GateData` dataclass holds a **polars DataFrame** (`df`) with a `date_time` column (`Datetime[us]`) and one or more gate position columns, plus ground-truth `breakpoints`, `slopes`, `plateaus`.  The `time` property returns elapsed seconds as a numpy array.  The `gate_columns` property lists the position column names.
+- `generate_synthetic_data(n_gates=2)` produces the canonical test signal (dt=0.01s, seed=42) with breakpoints at 2.0, 5.0, 9.0 s and slopes of -25.0 and -5.0 %/s.  Each gate receives slightly perturbed slopes (±5 %) and noise (±10 %).
+- `plot_results()` overlays all gates on a single figure; its `fitted_segments`, `detected_breakpoints`, and `estimated_slopes` parameters are dicts keyed by gate column name.
 
 **Each numbered script** (`0_…` through `6_…` and `8_…`) is self-contained and follows the same pattern:
-1. Call `generate_synthetic_data()` from `common.py`
-2. Run the method-specific analysis
-3. Call `plot_results()` and either save or display the figure
-4. Each has an `if __name__ == "__main__"` guard; they are invoked as modules (`python -m gate_analysis.<name>`)
+1. A core analysis function (e.g. `curve_fit_piecewise(time, position)`) that operates on numpy arrays — unchanged.
+2. An `analyze(data: GateData)` function that loops over all gate columns, returning `(results, segments)` dicts keyed by gate column name.
+3. An `if __name__ == "__main__"` guard that calls `analyze()`, then `plot_results()` with the per-gate results; invoked as modules (`python -m gate_analysis.<name>`).
 
 **Signal structure the methods target:** high plateau → fast linear ramp → slow linear ramp → low plateau (4 regimes, 3 breakpoints).
 

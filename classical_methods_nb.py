@@ -82,14 +82,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.0_curve_fit")
-    _result = _m.curve_fit_piecewise(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 0: Direct Curve Fit (scipy)",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return
@@ -107,14 +106,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.1_segmented_regression")
-    _result = _m.segmented_regression(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 1: Segmented Regression (Muggeo)",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return
@@ -132,14 +130,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.2_bayesian_changepoint")
-    _result = _m.bayesian_changepoint(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 2: Bayesian Change-Point Model (PyMC + ADVI)",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return
@@ -157,14 +154,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.3_cpop_piecewise_linear")
-    _result = _m.cpop_piecewise_linear(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 3: CPOP-like Continuous Piecewise Linear",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return
@@ -182,14 +178,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.4_ruptures_ols")
-    _result = _m.ruptures_ols(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 4: ruptures + OLS",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return
@@ -206,8 +201,12 @@ def _(mo):
 
 @app.cell
 def _(Label, Span, bk_figure, column, data, importlib, show):
+    from bokeh.palettes import Category10 as _C10
+
     _m = importlib.import_module("gate_analysis.5_savitzky_golay")
-    _r = _m.savitzky_golay(data.time, data.position)
+    _results, _ = _m.analyze(data)
+    _colors = _C10[10]
+    _time = data.time
 
     _p1 = bk_figure(
         width=1100,
@@ -215,26 +214,28 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         title="Method 5 — Savitzky-Golay: signal + smoothed",
         y_axis_label="Gate position (%)",
     )
-    _p1.scatter(
-        data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2
-    )
-    _p1.line(
-        data.time,
-        _r["smoothed"],
-        line_color="blue",
-        line_width=1.5,
-        legend_label="SG smoothed",
-    )
-    for _bp in _r["breakpoints"]:
-        _p1.add_layout(
-            Span(
-                location=_bp,
-                dimension="height",
-                line_color="red",
-                line_dash="dashed",
-                line_alpha=0.7,
-            )
+    for _gi, _col in enumerate(data.gate_columns):
+        _c = _colors[_gi % 10]
+        _pos = data.df[_col].to_numpy()
+        _r = _results[_col]
+        _p1.scatter(_time, _pos, marker="circle", color=_c, alpha=0.2, size=2)
+        _p1.line(
+            _time,
+            _r["smoothed"],
+            line_color=_c,
+            line_width=1.5,
+            legend_label=f"{_col} SG smoothed",
         )
+        for _bp in _r["breakpoints"]:
+            _p1.add_layout(
+                Span(
+                    location=_bp,
+                    dimension="height",
+                    line_color=_c,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
     for _bp in data.breakpoints:
         _p1.add_layout(
             Span(
@@ -256,27 +257,40 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         y_axis_label="Derivative (%/s)",
         x_range=_p1.x_range,
     )
-    _p2.line(data.time, _r["derivative"], line_color="blue", line_width=1)
+    _info_lines = []
+    for _gi, _col in enumerate(data.gate_columns):
+        _c = _colors[_gi % 10]
+        _r = _results[_col]
+        _p2.line(
+            _time,
+            _r["derivative"],
+            line_color=_c,
+            line_width=1,
+            legend_label=f"{_col} dy/dt",
+        )
+        for _bp in _r["breakpoints"]:
+            _p2.add_layout(
+                Span(
+                    location=_bp,
+                    dimension="height",
+                    line_color=_c,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
+        for _si, _s in enumerate(_r["slopes"]):
+            _info_lines.append(f"{_col} slope {_si + 1}: {_s:.2f} %/s")
+    _info_lines.append(f"True: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s")
     _p2.add_layout(
         Span(location=0, dimension="width", line_color="black", line_width=0.5)
     )
-    for _bp in _r["breakpoints"]:
-        _p2.add_layout(
-            Span(
-                location=_bp,
-                dimension="height",
-                line_color="red",
-                line_dash="dashed",
-                line_alpha=0.7,
-            )
-        )
     _p2.add_layout(
         Label(
             x=10,
             y=10,
             x_units="screen",
             y_units="screen",
-            text=f"Fast slope: {_r['slopes'][0]:.2f} %/s\nSlow slope: {_r['slopes'][1]:.2f} %/s\nTrue: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s",
+            text="\n".join(_info_lines),
             text_font_size="9pt",
             background_fill_color="wheat",
             background_fill_alpha=0.8,
@@ -298,8 +312,12 @@ def _(mo):
 
 @app.cell
 def _(Label, Span, bk_figure, column, data, importlib, show):
+    from bokeh.palettes import Category10 as _C10
+
     _m = importlib.import_module("gate_analysis.6_kalman_filter")
-    _r = _m.kalman_adaptive(data.time, data.position)
+    _results, _ = _m.analyze(data)
+    _colors = _C10[10]
+    _time = data.time
 
     _p1 = bk_figure(
         width=1100,
@@ -307,26 +325,28 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         title="Method 6 — Kalman Filter: position",
         y_axis_label="Gate position (%)",
     )
-    _p1.scatter(
-        data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2
-    )
-    _p1.line(
-        data.time,
-        _r["filtered_position"],
-        line_color="blue",
-        line_width=1.5,
-        legend_label="Kalman filtered",
-    )
-    for _bp in _r["breakpoints"]:
-        _p1.add_layout(
-            Span(
-                location=_bp,
-                dimension="height",
-                line_color="red",
-                line_dash="dashed",
-                line_alpha=0.7,
-            )
+    for _gi, _col in enumerate(data.gate_columns):
+        _c = _colors[_gi % 10]
+        _pos = data.df[_col].to_numpy()
+        _r = _results[_col]
+        _p1.scatter(_time, _pos, marker="circle", color=_c, alpha=0.2, size=2)
+        _p1.line(
+            _time,
+            _r["filtered_position"],
+            line_color=_c,
+            line_width=1.5,
+            legend_label=f"{_col} filtered",
         )
+        for _bp in _r["breakpoints"]:
+            _p1.add_layout(
+                Span(
+                    location=_bp,
+                    dimension="height",
+                    line_color=_c,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
     for _bp in data.breakpoints:
         _p1.add_layout(
             Span(
@@ -348,27 +368,41 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         y_axis_label="Velocity (%/s)",
         x_range=_p1.x_range,
     )
-    _p2.line(data.time, _r["filtered_velocity"], line_color="blue", line_width=1)
+    _info_lines = []
+    for _gi, _col in enumerate(data.gate_columns):
+        _c = _colors[_gi % 10]
+        _r = _results[_col]
+        _p2.line(
+            _time,
+            _r["filtered_velocity"],
+            line_color=_c,
+            line_width=1,
+            legend_label=_col,
+        )
+        for _bp in _r["breakpoints"]:
+            _p2.add_layout(
+                Span(
+                    location=_bp,
+                    dimension="height",
+                    line_color=_c,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
+        _info_lines.append(
+            f"{_col}: fast={_r['slopes'][0]:.2f}, slow={_r['slopes'][1]:.2f} %/s"
+        )
+    _info_lines.append(f"True: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s")
     _p2.add_layout(
         Span(location=0, dimension="width", line_color="black", line_width=0.5)
     )
-    for _bp in _r["breakpoints"]:
-        _p2.add_layout(
-            Span(
-                location=_bp,
-                dimension="height",
-                line_color="red",
-                line_dash="dashed",
-                line_alpha=0.7,
-            )
-        )
     _p2.add_layout(
         Label(
             x=10,
             y=10,
             x_units="screen",
             y_units="screen",
-            text=f"Fast slope: {_r['slopes'][0]:.2f} %/s\nSlow slope: {_r['slopes'][1]:.2f} %/s\nTrue: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s",
+            text="\n".join(_info_lines),
             text_font_size="9pt",
             background_fill_color="wheat",
             background_fill_alpha=0.8,
@@ -391,14 +425,13 @@ def _(mo):
 @app.cell
 def _(data, importlib, plot_results, show):
     _m = importlib.import_module("gate_analysis.8_not_detection")
-    _result = _m.not_detection(data.time, data.position)
-    _segs = _m._build_segments(data, _result)
+    _results, _segs = _m.analyze(data)
     _fig = plot_results(
         data,
         "Method 8 — Narrowest-Over-Threshold (NOT)",
         fitted_segments=_segs,
-        detected_breakpoints=_result["breakpoints"],
-        estimated_slopes=_result["slopes"],
+        detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
+        estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
     show(_fig)
     return

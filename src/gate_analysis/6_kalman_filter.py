@@ -199,20 +199,49 @@ def _build_segments(
     return segs
 
 
+def analyze(
+    data: GateData,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Run adaptive Kalman filter analysis on all gate columns.
+
+    Returns (results, segments) dicts keyed by gate column name.
+    """
+    time = data.time
+    results: dict[str, dict[str, Any]] = {}
+    segments: dict[str, Any] = {}
+    for col in data.gate_columns:
+        position = data.df[col].to_numpy()
+        r = kalman_adaptive(time, position)
+        results[col] = r
+        segments[col] = _build_segments(data, r)
+    return results, segments
+
+
 if __name__ == "__main__":
     import time as _time
 
     from bokeh.io import show
     from bokeh.layouts import column
     from bokeh.models import Label, Span
+    from bokeh.palettes import Category10
     from bokeh.plotting import figure
 
     data = generate_synthetic_data()
+    colors = Category10[10]
+    time_arr = data.time
 
     t0 = _time.perf_counter()
-    result = kalman_adaptive(data.time, data.position)
+    results, _segments = analyze(data)
     elapsed = _time.perf_counter() - t0
     print(f"Runtime: {elapsed * 1000:.1f} ms")
+
+    _span_kw: dict[str, Any] = {"dimension": "height", "line_alpha": 0.7}
+
+    def _add_gt_spans(fig: figure) -> None:
+        for bp in data.breakpoints:
+            fig.add_layout(
+                Span(location=bp, line_color="green", line_dash="dotted", **_span_kw)
+            )
 
     # --- Panel 1: position ---
     p1 = figure(
@@ -221,29 +250,27 @@ if __name__ == "__main__":
         title="Method 6: Adaptive Kalman Filter (CUSUM + restart)",
         y_axis_label="Gate position (%)",
     )
-    p1.scatter(data.time, data.position, color="gray", alpha=0.3, size=2)
-    p1.line(
-        data.time,
-        result["filtered_position"],
-        line_color="steelblue",
-        line_width=1.5,
-        legend_label="Kalman filtered",
-    )
-    # OLS segment lines
-    for seg in result["segments"]:
-        t = data.time[seg["start_idx"] : seg["end_idx"]]
-        y = seg["slope"] * t + seg["intercept"]
-        p1.line(t, y, line_color="darkorange", line_width=2, line_dash="dashed")
-
-    _span_kw: dict[str, Any] = {"dimension": "height", "line_alpha": 0.7}
-    for bp in result["breakpoints"]:
-        p1.add_layout(
-            Span(location=bp, line_color="red", line_dash="dashed", **_span_kw)
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        position = data.df[col].to_numpy()
+        r = results[col]
+        p1.scatter(time_arr, position, color=color, alpha=0.2, size=2)
+        p1.line(
+            time_arr,
+            r["filtered_position"],
+            line_color=color,
+            line_width=1.5,
+            legend_label=f"{col} filtered",
         )
-    for bp in data.breakpoints:
-        p1.add_layout(
-            Span(location=bp, line_color="green", line_dash="dotted", **_span_kw)
-        )
+        for seg in r["segments"]:
+            t = time_arr[seg["start_idx"] : seg["end_idx"]]
+            y = seg["slope"] * t + seg["intercept"]
+            p1.line(t, y, line_color=color, line_width=2, line_dash="dashed")
+        for bp in r["breakpoints"]:
+            p1.add_layout(
+                Span(location=bp, line_color=color, line_dash="dashed", **_span_kw)
+            )
+    _add_gt_spans(p1)
     p1.legend.location = "top_right"
     p1.grid.grid_line_alpha = 0.3
 
@@ -255,37 +282,46 @@ if __name__ == "__main__":
         y_axis_label="Velocity (%/s)",
         x_range=p1.x_range,
     )
-    p2.line(
-        data.time, result["filtered_velocity"], line_color="steelblue", line_width=1
-    )
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        r = results[col]
+        p2.line(
+            time_arr,
+            r["filtered_velocity"],
+            line_color=color,
+            line_width=1,
+            legend_label=f"{col}",
+        )
+        for bp in r["breakpoints"]:
+            p2.add_layout(
+                Span(location=bp, line_color=color, line_dash="dashed", **_span_kw)
+            )
     p2.add_layout(
         Span(location=0, dimension="width", line_color="black", line_width=0.5)
     )
-    for bp in result["breakpoints"]:
-        p2.add_layout(
-            Span(location=bp, line_color="red", line_dash="dashed", **_span_kw)
-        )
     p2.grid.grid_line_alpha = 0.3
 
-    # --- Panel 3: NIS and CUSUM ---
+    # --- Panel 3: NIS and CUSUM (first gate only for readability) ---
+    first_col = data.gate_columns[0]
+    first_r = results[first_col]
     p3 = figure(
         width=1200,
         height=280,
-        title="CUSUM of Normalized Innovation Squared (NIS)",
+        title=f"CUSUM of Normalized Innovation Squared (NIS) — {first_col}",
         x_axis_label="Time (s)",
         y_axis_label="CUSUM / NIS",
         x_range=p1.x_range,
     )
     p3.line(
-        data.time,
-        result["nis_sequence"],
+        time_arr,
+        first_r["nis_sequence"],
         line_color="lightgray",
         line_width=0.8,
         legend_label="NIS",
     )
     p3.line(
-        data.time,
-        result["cusum"],
+        time_arr,
+        first_r["cusum"],
         line_color="crimson",
         line_width=1.5,
         legend_label="CUSUM(NIS)",
@@ -299,16 +335,19 @@ if __name__ == "__main__":
             line_width=1,
         )
     )
-    for bp in result["breakpoints"]:
+    for bp in first_r["breakpoints"]:
         p3.add_layout(
             Span(location=bp, line_color="red", line_dash="dashed", **_span_kw)
         )
     p3.legend.location = "top_right"
     p3.grid.grid_line_alpha = 0.3
 
-    info = (
-        f"Fast slope: {result['slopes'][0]:.2f} %/s  "
-        f"Slow slope: {result['slopes'][1]:.2f} %/s\n"
+    info_lines: list[str] = []
+    for col, r in results.items():
+        info_lines.append(
+            f"{col}: fast={r['slopes'][0]:.2f}, slow={r['slopes'][1]:.2f} %/s"
+        )
+    info_lines.append(
         f"True: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s  |  "
         f"Runtime: {elapsed * 1000:.1f} ms"
     )
@@ -318,7 +357,7 @@ if __name__ == "__main__":
             y=10,
             x_units="screen",
             y_units="screen",
-            text=info,
+            text="\n".join(info_lines),
             text_font_size="9pt",
             background_fill_color="wheat",
             background_fill_alpha=0.8,

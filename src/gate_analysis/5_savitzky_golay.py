@@ -162,52 +162,83 @@ def _build_segments(
     return [(data.time, result["smoothed"])]
 
 
+def analyze(
+    data: GateData,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Run Savitzky-Golay analysis on all gate columns.
+
+    Returns (results, segments) dicts keyed by gate column name.
+    """
+    time = data.time
+    results: dict[str, dict[str, Any]] = {}
+    segments: dict[str, Any] = {}
+    for col in data.gate_columns:
+        position = data.df[col].to_numpy()
+        r = savitzky_golay(time, position)
+        results[col] = r
+        segments[col] = _build_segments(data, r)
+    return results, segments
+
+
 if __name__ == "__main__":
     from bokeh.io import show
     from bokeh.layouts import column
     from bokeh.models import Label, Span
+    from bokeh.palettes import Category10
     from bokeh.plotting import figure
 
     data = generate_synthetic_data()
-    result = savitzky_golay(data.time, data.position)
+    results, _segments = analyze(data)
 
-    def _add_breakpoint_spans(
-        fig: figure, bps: list[float], *, gt: bool = False
-    ) -> None:
-        for bp in bps:
+    colors = Category10[10]
+    time = data.time
+
+    def _add_gt_spans(fig: figure) -> None:
+        for bp in data.breakpoints:
             fig.add_layout(
                 Span(
                     location=bp,
                     dimension="height",
-                    line_color="green" if gt else "red",
-                    line_dash="dotted" if gt else "dashed",
-                    line_alpha=0.4 if gt else 0.7,
+                    line_color="green",
+                    line_dash="dotted",
+                    line_alpha=0.4,
                 )
             )
 
-    # Top: signal + smoothed
+    # Top: signal + smoothed (per gate)
     p1 = figure(
         width=1200,
         height=350,
         title="Method 5: Savitzky-Golay Derivative + Peak Detection",
         y_axis_label="Gate position (%)",
     )
-    p1.scatter(
-        data.time, data.position, marker="circle", color="gray", alpha=0.3, size=2
-    )
-    p1.line(
-        data.time,
-        result["smoothed"],
-        line_color="blue",
-        line_width=1.5,
-        legend_label="SG smoothed",
-    )
-    _add_breakpoint_spans(p1, result["breakpoints"])
-    _add_breakpoint_spans(p1, data.breakpoints, gt=True)
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        position = data.df[col].to_numpy()
+        r = results[col]
+        p1.scatter(time, position, marker="circle", color=color, alpha=0.2, size=2)
+        p1.line(
+            time,
+            r["smoothed"],
+            line_color=color,
+            line_width=1.5,
+            legend_label=f"{col} SG smoothed",
+        )
+        for bp in r["breakpoints"]:
+            p1.add_layout(
+                Span(
+                    location=bp,
+                    dimension="height",
+                    line_color=color,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
+    _add_gt_spans(p1)
     p1.legend.location = "top_right"
     p1.grid.grid_line_alpha = 0.3
 
-    # Middle: first derivative
+    # Middle: first derivative (per gate)
     p2 = figure(
         width=1200,
         height=300,
@@ -215,22 +246,34 @@ if __name__ == "__main__":
         y_axis_label="dy/dt (%/s)",
         x_range=p1.x_range,
     )
-    p2.line(
-        data.time,
-        result["derivative"],
-        line_color="blue",
-        line_width=1,
-        legend_label="dy/dt",
-    )
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        r = results[col]
+        p2.line(
+            time,
+            r["derivative"],
+            line_color=color,
+            line_width=1,
+            legend_label=f"{col} dy/dt",
+        )
+        for bp in r["breakpoints"]:
+            p2.add_layout(
+                Span(
+                    location=bp,
+                    dimension="height",
+                    line_color=color,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
     p2.add_layout(
         Span(location=0, dimension="width", line_color="black", line_width=0.5)
     )
-    _add_breakpoint_spans(p2, result["breakpoints"])
-    _add_breakpoint_spans(p2, data.breakpoints, gt=True)
+    _add_gt_spans(p2)
     p2.legend.location = "top_right"
     p2.grid.grid_line_alpha = 0.3
 
-    # Bottom: step-score + detected peaks
+    # Bottom: step-score (per gate)
     p3 = figure(
         width=1200,
         height=300,
@@ -239,19 +282,33 @@ if __name__ == "__main__":
         y_axis_label="Step score (%/s)",
         x_range=p1.x_range,
     )
-    p3.line(
-        data.time,
-        result["step_score"],
-        line_color="darkorange",
-        line_width=1,
-        legend_label="step score",
-    )
-    _add_breakpoint_spans(p3, result["breakpoints"])
-    _add_breakpoint_spans(p3, data.breakpoints, gt=True)
+    for g_idx, col in enumerate(data.gate_columns):
+        color = colors[g_idx % 10]
+        r = results[col]
+        p3.line(
+            time,
+            r["step_score"],
+            line_color=color,
+            line_width=1,
+            legend_label=f"{col} step score",
+        )
+        for bp in r["breakpoints"]:
+            p3.add_layout(
+                Span(
+                    location=bp,
+                    dimension="height",
+                    line_color=color,
+                    line_dash="dashed",
+                    line_alpha=0.7,
+                )
+            )
+    _add_gt_spans(p3)
     p3.grid.grid_line_alpha = 0.3
 
-    slopes = result["slopes"]
-    info_lines = [f"Slope {i + 1}: {s:.2f} %/s" for i, s in enumerate(slopes)]
+    info_lines: list[str] = []
+    for col, r in results.items():
+        for i, s in enumerate(r["slopes"]):
+            info_lines.append(f"{col} slope {i + 1}: {s:.2f} %/s")
     info_lines.append(f"True: {data.slopes[0]:.1f}, {data.slopes[1]:.1f} %/s")
     p3.add_layout(
         Label(

@@ -173,7 +173,7 @@ def _(mo):
 def _(data, find_peaks, gaussian_filter1d, mo, np, pipe_recon):
     import torch as _torch
 
-    _pos_np = data.position.astype(np.float32)
+    _pos_np = data.df[data.gate_columns[0]].to_numpy().astype(np.float32)
     _n = len(_pos_np)
     _seq_len = pipe_recon.config.seq_len  # 512
     _step = 16
@@ -365,8 +365,8 @@ def _(generate_synthetic_data, mo, np):
                 t_total=14.0,
                 seed=seed,
             )
-            d = generate_synthetic_data(**kw)
-            pos = d.position.astype(np.float32)
+            d = generate_synthetic_data(**kw, n_gates=1)
+            pos = d.df[d.gate_columns[0]].to_numpy().astype(np.float32)
             dt = float(d.time[1] - d.time[0])
             bp_t = np.random.choice(d.breakpoints)
             bp_idx = int(bp_t / dt)
@@ -538,7 +538,7 @@ def _(
     pipe_emb,
     torch,
 ):
-    _pos_np = data.position.astype(np.float32)
+    _pos_np = data.df[data.gate_columns[0]].to_numpy().astype(np.float32)
     _n = len(_pos_np)
 
     # Edge-pad so every sample can be a window centre
@@ -811,7 +811,7 @@ def _(
     np,
     torch,
 ):
-    _pos_llsa = data.position.astype(np.float32)
+    _pos_llsa = data.df[data.gate_columns[0]].to_numpy().astype(np.float32)
     _n_llsa = len(_pos_llsa)
     _pad_llsa = SEQ_LEN // 2
     _padded_llsa = np.pad(_pos_llsa, (_pad_llsa, _pad_llsa), mode="edge")
@@ -1050,7 +1050,7 @@ def _(nn, torch):
 @app.cell
 def _(AnomalyTransformer, data, mo, nn, np, torch):
     _AT_WIN = 64
-    _pos_at = data.position.astype(np.float32)
+    _pos_at = data.df[data.gate_columns[0]].to_numpy().astype(np.float32)
     _n_at = len(_pos_at)
 
     # All stride-1 windows (~1137 windows for a 1200-sample signal)
@@ -1107,7 +1107,7 @@ def _(AnomalyTransformer, data, mo, nn, np, torch):
 
 @app.cell
 def _(at_model, at_win_len, data, find_peaks, gaussian_filter1d, linregress, np, torch):
-    _pos_at_inf = data.position.astype(np.float32)
+    _pos_at_inf = data.df[data.gate_columns[0]].to_numpy().astype(np.float32)
     _n_at_inf = len(_pos_at_inf)
     _n_wins_at = _n_at_inf - at_win_len + 1
 

@@ -16,6 +16,7 @@ dependencies = [
     "ruptures",
     "filterpy",
     "marimo>=0.19.11",
+    "polars>=1.39.3",
 ]
 
 [dependency-groups]
