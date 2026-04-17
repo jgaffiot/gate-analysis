@@ -20,7 +20,8 @@ class GateData:
 
     The DataFrame ``df`` has a ``date_time`` column (:pyclass:`Datetime("us")`)
     and one or more gate position columns.  Ground-truth parameters are shared
-    across gates in synthetic data.
+    across gates in synthetic data.  When a trapezoid channel is present
+    (``gate_1``), ``trapezoid_decrease_rate`` holds its decrease rate in %/s.
     """
 
     df: pl.DataFrame
@@ -28,6 +29,7 @@ class GateData:
     breakpoints: list[float] = field(default_factory=list)
     slopes: list[float] = field(default_factory=list)
     plateaus: tuple[float, float] = (98.0, 2.0)
+    trapezoid_decrease_rate: float | None = None
 
     @property
     def gate_columns(self) -> list[str]:
@@ -52,31 +54,49 @@ def generate_synthetic_data(
     t_start_closing: float = 2.0,
     t_slope_change: float = 5.0,
     t_end_closing: float = 9.0,
-    t_total: float = 12.0,
+    t_total: float = 15.0,
     slope_fast: float = -25.0,
     slope_slow: float = -5.0,
     noise_std: float = 1.0,
     n_gates: int = 2,
+    trapezoid_decrease_rate: float | None = None,
+    trapezoid_rise_duration: float = 1.0,
     start_datetime: datetime | None = None,
     seed: int = 42,
 ) -> GateData:
     """Generate a realistic synthetic gate closing signal.
 
-    The signal has four phases:
+    ``gate_0`` has four phases:
     1. High plateau (~plateau_high%)
     2. Fast linear closing (steep negative slope)
     3. Slow linear closing (gentle negative slope)
     4. Low plateau (~plateau_low%)
 
+    ``gate_1`` (when ``n_gates >= 2``) is a trapezoid channel:
+    - 0 % before the gate starts closing
+    - 100 % plateau while the gate closes fast
+    - linear decrease at ``trapezoid_decrease_rate`` %/s until it reaches 0
+
+    Additional gates (``gate_2`` and above) follow the same perturbed-slope
+    pattern as ``gate_0``.
+
     Parameters
     ----------
     n_gates : int
-        Number of gate columns to generate (default 2).  Each gate receives
-        slightly perturbed slopes (±5 %) and noise (±10 %).
+        Number of gate columns to generate (default 2).  Gates other than
+        ``gate_1`` receive slightly perturbed slopes (±5 %) and noise (±10 %).
+    trapezoid_decrease_rate : float or None
+        Decrease rate of the trapezoid channel in %/s.  Defaults to
+        ``2 * abs(slope_slow)``.
+    trapezoid_rise_duration : float
+        Duration of the linear rise from 0 to 100 % in seconds (default 1.0).
     start_datetime : datetime or None
         Start timestamp for the ``date_time`` column.  Defaults to
         ``datetime(2024, 1, 1)``.
     """
+    if trapezoid_decrease_rate is None:
+        trapezoid_decrease_rate = 2.0 * abs(slope_slow)
+
     rng = np.random.default_rng(seed)
 
     if start_datetime is None:
@@ -87,33 +107,54 @@ def generate_synthetic_data(
     # Build datetime column
     date_times = [start_datetime + timedelta(seconds=float(t)) for t in time_arr]
 
-    # Build gate columns with slightly perturbed parameters
+    # Build gate columns
     gate_data: dict[str, npt.NDArray[np.floating[Any]]] = {}
     for g in range(n_gates):
-        slope_fast_g = slope_fast * (1.0 + 0.05 * rng.standard_normal())
-        slope_slow_g = slope_slow * (1.0 + 0.05 * rng.standard_normal())
         noise_std_g = noise_std * (1.0 + 0.1 * abs(rng.standard_normal()))
 
-        pos_at_start = plateau_high
-        pos_at_slope_change = pos_at_start + slope_fast_g * (
-            t_slope_change - t_start_closing
-        )
-
-        position = np.where(
-            time_arr < t_start_closing,
-            plateau_high,
-            np.where(
-                time_arr < t_slope_change,
-                pos_at_start + slope_fast_g * (time_arr - t_start_closing),
+        if g == 1:
+            # Trapezoid: 0 → linear rise → plateau at 100 % → linear decrease → 0
+            t_rise_end = t_start_closing + trapezoid_rise_duration
+            rise = 100.0 * (time_arr - t_start_closing) / trapezoid_rise_duration
+            decrease = np.maximum(
+                0.0,
+                100.0 - trapezoid_decrease_rate * (time_arr - t_slope_change),
+            )
+            position = np.where(
+                time_arr < t_start_closing,
+                0.0,
                 np.where(
-                    time_arr < t_end_closing,
-                    pos_at_slope_change + slope_slow_g * (time_arr - t_slope_change),
-                    plateau_low,
+                    time_arr < t_rise_end,
+                    rise,
+                    np.where(time_arr < t_slope_change, 100.0, decrease),
                 ),
-            ),
-        )
+            )
+            position = np.clip(position, 0.0, 100.0)
+        else:
+            slope_fast_g = slope_fast * (1.0 + 0.05 * rng.standard_normal())
+            slope_slow_g = slope_slow * (1.0 + 0.05 * rng.standard_normal())
 
-        position = np.clip(position, plateau_low, plateau_high)
+            pos_at_start = plateau_high
+            pos_at_slope_change = pos_at_start + slope_fast_g * (
+                t_slope_change - t_start_closing
+            )
+
+            position = np.where(
+                time_arr < t_start_closing,
+                plateau_high,
+                np.where(
+                    time_arr < t_slope_change,
+                    pos_at_start + slope_fast_g * (time_arr - t_start_closing),
+                    np.where(
+                        time_arr < t_end_closing,
+                        pos_at_slope_change
+                        + slope_slow_g * (time_arr - t_slope_change),
+                        plateau_low,
+                    ),
+                ),
+            )
+            position = np.clip(position, plateau_low, plateau_high)
+
         position = position + rng.normal(0, noise_std_g, size=position.shape)
 
         gate_data[f"gate_{g}"] = position
@@ -127,6 +168,7 @@ def generate_synthetic_data(
         breakpoints=[t_start_closing, t_slope_change, t_end_closing],
         slopes=[slope_fast, slope_slow],
         plateaus=(plateau_high, plateau_low),
+        trapezoid_decrease_rate=trapezoid_decrease_rate,
     )
 
 
