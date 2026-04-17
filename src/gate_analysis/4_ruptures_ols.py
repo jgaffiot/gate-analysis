@@ -1,8 +1,17 @@
 """Method 4: Change-point detection with ruptures + OLS slope estimation.
 
-Uses the ruptures library for segmentation (PELT or Dynp with a linear cost
-model), then fits OLS on each segment to estimate slopes with confidence
+Uses the ruptures library for segmentation (PELT or Dynp with the ``linear``
+cost model), then fits OLS on each segment to estimate slopes with confidence
 intervals.
+
+The ``linear`` cost fits ``position ~ intercept + slope * time`` within each
+segment (least-squares).  This is the correct cost for piecewise-linear
+signals; the ``l2`` cost minimises within-segment variance (piecewise-constant
+assumption) and systematically misplaces breakpoints on ramp signals.
+
+Signal format for ``CostLinear``: first column = response, remaining columns =
+covariates.  We pass ``[position, ones, time]`` so the model is
+``position = a + b * time`` with intercept.
 """
 
 from __future__ import annotations
@@ -63,15 +72,17 @@ def ruptures_ols(
     -------
     dict with keys: breakpoints, segments, slopes
     """
-    signal = position.reshape(-1, 1)
+    # CostLinear format: first column = response, rest = covariates (no intercept
+    # built-in), so we add a constant column explicitly.
+    signal = np.column_stack([position, np.ones(len(position)), time])
 
     if method == "pelt":
-        algo = rpt.Pelt(model="l2", min_size=20).fit(signal)
+        algo = rpt.Pelt(model="linear", min_size=20).fit(signal)
         if penalty is None:
             penalty = 10.0
         change_indices = algo.predict(pen=penalty)
     else:
-        algo = rpt.Dynp(model="l2", min_size=20).fit(signal)
+        algo = rpt.Dynp(model="linear", min_size=20).fit(signal)
         if n_breakpoints is None:
             n_breakpoints = 3
         change_indices = algo.predict(n_bkps=n_breakpoints)
@@ -162,7 +173,7 @@ def analyze(
     segments: dict[str, Any] = {}
     for col in data.gate_columns:
         position = data.df[col].to_numpy()
-        r = ruptures_ols(time, position)
+        r = ruptures_ols(time, position, n_breakpoints=3)
         results[col] = r
         segments[col] = _build_segments(data, r)
     return results, segments
