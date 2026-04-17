@@ -45,7 +45,7 @@ def _(CDN, base64, file_html, mo):
             f"</iframe>"
         )
 
-    return
+    return (bk,)
 
 
 @app.cell(hide_code=True)
@@ -80,9 +80,13 @@ def _(mo):
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.0_curve_fit")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
         "Method 0: Direct Curve Fit (scipy)",
@@ -90,7 +94,7 @@ def _(data, importlib, plot_results, show):
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -104,9 +108,13 @@ def _(mo):
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.1_segmented_regression")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
         "Method 1: Segmented Regression (Muggeo)",
@@ -114,7 +122,7 @@ def _(data, importlib, plot_results, show):
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -128,17 +136,21 @@ def _(mo):
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.2_bayesian_changepoint")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
-        "Method 2: Bayesian Change-Point Model (PyMC + ADVI)",
+        "Method 2: Bayesian MAP + Laplace (scipy)",
         fitted_segments=_segs,
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -152,9 +164,13 @@ def _(mo):
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.3_cpop_piecewise_linear")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
         "Method 3: CPOP-like Continuous Piecewise Linear",
@@ -162,7 +178,7 @@ def _(data, importlib, plot_results, show):
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -170,15 +186,19 @@ def _(data, importlib, plot_results, show):
 def _(mo):
     mo.md(r"""
     ## Method 4 — ruptures + OLS
-    *Library:* `ruptures` + `scipy` &nbsp;|&nbsp; *Less accurate (L2 cost)*
+    *Library:* `ruptures` + `scipy` &nbsp;|&nbsp; *Linear cost model (piecewise-linear segments)*
     """)
     return
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.4_ruptures_ols")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
         "Method 4: ruptures + OLS",
@@ -186,7 +206,7 @@ def _(data, importlib, plot_results, show):
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -200,11 +220,14 @@ def _(mo):
 
 
 @app.cell
-def _(Label, Span, bk_figure, column, data, importlib, show):
+def _(Label, Span, bk, bk_figure, column, data, importlib, mo):
+    import time as _time
     from bokeh.palettes import Category10 as _C10
 
     _m = importlib.import_module("gate_analysis.5_savitzky_golay")
+    _t0 = _time.perf_counter()
     _results, _ = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _colors = _C10[10]
     _time = data.time
 
@@ -297,7 +320,7 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         )
     )
     _p2.grid.grid_line_alpha = 0.3
-    show(column(_p1, _p2))
+    mo.vstack([bk(column(_p1, _p2), height=700), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -311,11 +334,14 @@ def _(mo):
 
 
 @app.cell
-def _(Label, Span, bk_figure, column, data, importlib, show):
+def _(Label, Span, bk, bk_figure, column, data, importlib, mo):
+    import time as _time
     from bokeh.palettes import Category10 as _C10
 
     _m = importlib.import_module("gate_analysis.6_kalman_filter")
+    _t0 = _time.perf_counter()
     _results, _ = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _colors = _C10[10]
     _time = data.time
 
@@ -409,7 +435,7 @@ def _(Label, Span, bk_figure, column, data, importlib, show):
         )
     )
     _p2.grid.grid_line_alpha = 0.3
-    show(column(_p1, _p2))
+    mo.vstack([bk(column(_p1, _p2), height=700), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 
@@ -423,9 +449,13 @@ def _(mo):
 
 
 @app.cell
-def _(data, importlib, plot_results, show):
+def _(bk, data, importlib, mo, plot_results):
+    import time as _time
+
     _m = importlib.import_module("gate_analysis.8_not_detection")
+    _t0 = _time.perf_counter()
     _results, _segs = _m.analyze(data)
+    _elapsed = _time.perf_counter() - _t0
     _fig = plot_results(
         data,
         "Method 8 — Narrowest-Over-Threshold (NOT)",
@@ -433,7 +463,7 @@ def _(data, importlib, plot_results, show):
         detected_breakpoints={c: r["breakpoints"] for c, r in _results.items()},
         estimated_slopes={c: r["slopes"] for c, r in _results.items()},
     )
-    show(_fig)
+    mo.vstack([bk(_fig), mo.md(f"⏱ **{_elapsed:.3f} s**")])
     return
 
 

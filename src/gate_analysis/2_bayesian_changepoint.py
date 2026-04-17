@@ -298,6 +298,7 @@ def bayesian_changepoint_trapezoid(
     rise_rate = np.exp(log_rise_rate)
     dec_rate = np.exp(log_dec_rate)
     t_rise_end = tau1 + 100.0 / rise_rate
+    t_zero = min(tau2 + 100.0 / dec_rate, float(time[-1]))
     sigma_noise = np.exp(log_sigma)
 
     hess = _numerical_hessian(neg_log_posterior, result.x)
@@ -318,6 +319,7 @@ def bayesian_changepoint_trapezoid(
     print(f"Rise start: tau1={tau1:.3f} ± {se[0]:.3f} s")
     print(f"Rise end:   {t_rise_end:.3f} s")
     print(f"Decrease start: tau2={tau2:.3f} ± {se_tau2:.3f} s")
+    print(f"Zero crossing:  {t_zero:.3f} s")
     print(
         f"Rise rate:  {rise_rate:.2f} ± {se_rise_rate:.2f} %/s"
         f"  →  95 % CI: [{rise_rate - 1.96 * se_rise_rate:.2f}, {rise_rate + 1.96 * se_rise_rate:.2f}]"
@@ -329,7 +331,7 @@ def bayesian_changepoint_trapezoid(
     print(f"Noise σ: {sigma_noise:.2f} %")
 
     return {
-        "breakpoints": [tau1, t_rise_end, tau2],
+        "breakpoints": [tau1, t_rise_end, tau2, t_zero],
         "slopes": [rise_rate, -dec_rate],
         "slope_stderr": [se_rise_rate, se_dec_rate],
         "tau_stderr": [float(se[0]), float(np.nan), se_tau2],
@@ -343,7 +345,7 @@ def _build_segments(
 ) -> list[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]]:
     """Build fitted line segments for plotting."""
     if result.get("model") == "trapezoid":
-        t1, t_rise_end, t2 = result["breakpoints"]
+        t1, t_rise_end, t2, t_zero = result["breakpoints"]
         rise_rate, neg_dec_rate = result["slopes"]
         dec_rate = -neg_dec_rate
         segments = []
@@ -351,7 +353,8 @@ def _build_segments(
             (data.time[0], t1, lambda t: np.zeros_like(t)),
             (t1, t_rise_end, lambda t: rise_rate * (t - t1)),
             (t_rise_end, t2, lambda t: np.full_like(t, 100.0)),
-            (t2, data.time[-1], lambda t: np.maximum(0.0, 100.0 - dec_rate * (t - t2))),
+            (t2, t_zero, lambda t: 100.0 - dec_rate * (t - t2)),
+            (t_zero, data.time[-1], lambda t: np.zeros_like(t)),
         ]:
             mask = (data.time >= t_lo) & (data.time <= t_hi)
             t_seg = data.time[mask]

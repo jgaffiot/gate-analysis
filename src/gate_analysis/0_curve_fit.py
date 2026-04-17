@@ -183,17 +183,19 @@ def curve_fit_trapezoid(
 
     t1, t2, rise_rate, dec_rate = popt
     t_rise_end = t1 + 100.0 / rise_rate
+    t_zero = min(t2 + 100.0 / dec_rate, float(time[-1]))
     perr = np.sqrt(np.diag(pcov))
 
     print("=== Method 0: Trapezoid curve_fit (scipy) ===")
     print(f"Rise start:     {t1:.3f} s")
     print(f"Rise end:       {t_rise_end:.3f} s")
     print(f"Decrease start: {t2:.3f} s")
+    print(f"Zero crossing:  {t_zero:.3f} s")
     print(f"Rise rate:      {rise_rate:.2f} ± {perr[2]:.2f} %/s")
     print(f"Decrease rate:  {dec_rate:.2f} ± {perr[3]:.2f} %/s")
 
     return {
-        "breakpoints": [t1, t_rise_end, t2],
+        "breakpoints": [t1, t_rise_end, t2, t_zero],
         "slopes": [rise_rate, -dec_rate],
         "slope_stderr": [perr[2], perr[3]],
         "params": popt,

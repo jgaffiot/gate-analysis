@@ -3,6 +3,9 @@
 Custom dynamic-programming implementation inspired by Fearnhead et al. (2019).
 Finds the optimal continuous piecewise-linear fit minimizing residual sum of
 squares plus an L0 penalty on slope changes.
+
+Optimization uses unconstrained per-segment OLS (fast, correct BIC landscape).
+The final output uses a continuous piecewise-linear fit for smooth plotting.
 """
 
 from __future__ import annotations
@@ -11,7 +14,38 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from scipy.optimize import minimize
+
 from gate_analysis.common import GateData, generate_synthetic_data, plot_results
+
+
+def _unconstrained_rss(
+    time: npt.NDArray[np.floating[Any]],
+    position: npt.NDArray[np.floating[Any]],
+    breakpoint_indices: list[int],
+) -> float:
+    """Sum of per-segment OLS residuals (unconstrained, no continuity requirement).
+
+    Much faster than the constrained fit and gives a well-behaved BIC landscape:
+    the continuity constraint can add hundreds of RSS units at the true breakpoints,
+    corrupting BIC model-selection when comparing different breakpoint counts.
+    """
+    bps = [0, *breakpoint_indices, len(time)]
+    total = 0.0
+    for i in range(len(bps) - 1):
+        t_seg = time[bps[i] : bps[i + 1]]
+        p_seg = position[bps[i] : bps[i + 1]]
+        t_mean = t_seg.mean()
+        p_mean = p_seg.mean()
+        xm = t_seg - t_mean
+        denom = float(np.dot(xm, xm))
+        if denom < 1e-12:
+            total += float(np.dot(p_seg - p_mean, p_seg - p_mean))
+        else:
+            slope = float(np.dot(xm, p_seg - p_mean) / denom)
+            resid = p_seg - p_mean - slope * xm
+            total += float(np.dot(resid, resid))
+    return total
 
 
 def _fit_continuous_piecewise_linear(
@@ -21,17 +55,12 @@ def _fit_continuous_piecewise_linear(
 ) -> tuple[float, list[float], npt.NDArray[np.floating[Any]]]:
     """Fit a continuous piecewise-linear function at given breakpoints.
 
-    Returns (rss, slopes, fitted_values).
-    The fit is constrained to be continuous at breakpoints.
-    Parameterisation: intercept + one cumulative-basis slope per segment.
+    Returns (rss, slopes, fitted_values).  Called once per n_bps after
+    the optimal breakpoints are found, purely for the final smooth output.
 
-    The design matrix column k+1 encodes the contribution of segment k's
-    slope to each sample:
-      - 0                      for samples before segment k starts
-      - time[j] - time[i_start] for samples within segment k
-      - time[i_end] - time[i_start] for samples after segment k ends
-
-    Built with pure NumPy broadcasting (no Python inner loop over samples).
+    Design matrix column k+1: 0 before segment k, (time - t_start) within
+    segment k, constant (t_end - t_start) after segment k ends.  This
+    encodes a continuous model where each coeff[k+1] is the slope of segment k.
     """
     n = len(time)
     bps = [0, *breakpoint_indices, n]
@@ -96,27 +125,44 @@ def cpop_piecewise_linear(
     dict with keys: breakpoints, slopes, n_breakpoints, fitted, bic_scores
     """
     n = len(time)
+    dt = float(time[1] - time[0]) if n > 1 else 0.01
     if penalty is None:
         penalty = 2.0 * np.log(n)
 
-    # Downsample candidate positions for efficiency
-    step = max(1, n // 200)
-    candidates = list(range(step, n - step, step))
+    # Minimum segment length: enough samples for a meaningful linear fit
+    min_seg = max(10, n // 100)
+    t_lo = float(time[min_seg])
+    t_hi = float(time[n - 1 - min_seg])
 
     best_cost = np.inf
     best_result: dict[str, Any] = {}
     bic_scores: list[tuple[int, float]] = []
+
+    # Helper: convert time values → valid, sorted integer indices
+    def _to_idxs(ts: list[float]) -> list[int]:
+        return sorted(
+            int(np.clip(np.searchsorted(time, t), min_seg, n - 1 - min_seg)) for t in ts
+        )
+
+    def _valid(idxs: list[int]) -> bool:
+        all_bps = [0, *idxs, n]
+        return all(
+            all_bps[i + 1] - all_bps[i] >= min_seg for i in range(len(all_bps) - 1)
+        )
 
     counts = (
         [n_breakpoints] if n_breakpoints is not None else range(0, max_breakpoints + 1)
     )
     for n_bps in counts:
         if n_bps == 0:
-            rss, slopes, fitted = _fit_continuous_piecewise_linear(time, position, [])
-            cost = rss + penalty * 0
+            rss_unc = _unconstrained_rss(time, position, [])
+            cost = rss_unc
             bic_scores.append((0, cost))
             if cost < best_cost:
                 best_cost = cost
+                rss, slopes, fitted = _fit_continuous_piecewise_linear(
+                    time, position, []
+                )
                 best_result = {
                     "breakpoint_indices": [],
                     "slopes": slopes,
@@ -126,42 +172,63 @@ def cpop_piecewise_linear(
                 }
             continue
 
-        # Greedy search: start with evenly spaced, then refine
-        bp_indices = [int(n * (k + 1) / (n_bps + 1)) for k in range(n_bps)]
+        # Phase 1: forward-greedy initialisation with unconstrained RSS.
+        # Add one breakpoint at a time at the position giving the largest RSS
+        # reduction.  Unconstrained RSS gives a smooth, correct landscape for
+        # BIC — the continuity constraint can add 500–1500 RSS units at the
+        # true breakpoints, making BIC over-select breakpoints.
+        n_search = 30
+        t_grid = np.linspace(t_lo, t_hi, n_search + 2)[1:-1]
+        greedy_times: list[float] = []
+        for _step in range(n_bps):
+            best_rss_g = np.inf
+            best_t_g = float(t_grid[len(t_grid) // 2])
+            for t_cand in t_grid:
+                trial_times = sorted(greedy_times + [float(t_cand)])
+                idxs = _to_idxs(trial_times)
+                if not _valid(idxs):
+                    continue
+                rss_g = _unconstrained_rss(time, position, idxs)
+                if rss_g < best_rss_g:
+                    best_rss_g = rss_g
+                    best_t_g = float(t_cand)
+            greedy_times.append(best_t_g)
 
-        # Iterative refinement: optimize each breakpoint one at a time
-        for _iteration in range(10):
-            improved = False
-            for bp_idx in range(n_bps):
-                current_best_rss = np.inf
-                current_best_pos = bp_indices[bp_idx]
-                for cand in candidates:
-                    trial = bp_indices.copy()
-                    trial[bp_idx] = cand
-                    trial.sort()
-                    # Ensure minimum segment size
-                    all_bps = [0, *trial, n]
-                    if any(
-                        all_bps[i + 1] - all_bps[i] < step * 2
-                        for i in range(len(all_bps) - 1)
-                    ):
-                        continue
-                    rss, _, _ = _fit_continuous_piecewise_linear(time, position, trial)
-                    if rss < current_best_rss:
-                        current_best_rss = rss
-                        current_best_pos = cand
-                if current_best_pos != bp_indices[bp_idx]:
-                    bp_indices[bp_idx] = current_best_pos
-                    bp_indices.sort()
-                    improved = True
-            if not improved:
-                break
+        x0 = np.array(sorted(greedy_times))
 
+        # Phase 2: Nelder-Mead joint refinement from the greedy solution.
+        # All breakpoints are optimised simultaneously, so the simplex can
+        # escape the shallow troughs that trap coordinate-descent.
+        def _objective(
+            t_bps: npt.NDArray[np.floating[Any]],
+        ) -> float:
+            idxs = _to_idxs(list(t_bps))
+            if not _valid(idxs):
+                return 1e15
+            return _unconstrained_rss(time, position, idxs)
+
+        res = minimize(
+            _objective,
+            x0,
+            method="Nelder-Mead",
+            options={
+                "xatol": dt * 2,
+                "fatol": 1.0,
+                "maxiter": 5_000,
+                "adaptive": True,
+            },
+        )
+        bp_indices = _to_idxs(list(res.x))
+
+        # BIC uses unconstrained RSS (2 params per segment → 2*log(n) per breakpoint)
+        rss_unc = _unconstrained_rss(time, position, bp_indices)
+        cost = rss_unc + penalty * n_bps
+        bic_scores.append((n_bps, cost))
+
+        # Continuous fit computed once per n_bps, only for final output
         rss, slopes, fitted = _fit_continuous_piecewise_linear(
             time, position, bp_indices
         )
-        cost = rss + penalty * n_bps
-        bic_scores.append((n_bps, cost))
 
         if cost < best_cost:
             best_cost = cost
