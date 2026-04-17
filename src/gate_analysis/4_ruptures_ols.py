@@ -171,9 +171,10 @@ def analyze(
     time = data.time
     results: dict[str, dict[str, Any]] = {}
     segments: dict[str, Any] = {}
-    for col in data.gate_columns:
+    for g_idx, col in enumerate(data.gate_columns):
         position = data.df[col].to_numpy()
-        r = ruptures_ols(time, position, n_breakpoints=3)
+        is_trapezoid = g_idx == 1 and data.trapezoid_decrease_rate is not None
+        r = ruptures_ols(time, position, n_breakpoints=4 if is_trapezoid else 3)
         results[col] = r
         segments[col] = _build_segments(data, r)
     return results, segments

@@ -19,6 +19,7 @@ def segmented_regression(
     time: npt.NDArray[np.floating[Any]],
     position: npt.NDArray[np.floating[Any]],
     n_breakpoints: int = 3,
+    start_values: list[float] | None = None,
 ) -> dict[str, Any]:
     """Fit a piecewise-linear model using Muggeo's segmented regression.
 
@@ -31,6 +32,11 @@ def segmented_regression(
     n_breakpoints : int
         Number of breakpoints to fit (default 3: start of closing,
         slope change, end of closing).
+    start_values : list of float, optional
+        Initial breakpoint positions passed to Muggeo's algorithm.
+        Required when the signal has very abrupt slope changes (e.g.
+        the trapezoid's ~100 %/s rise) that cause convergence failure
+        from the default evenly-spaced initialisation.
 
     Returns
     -------
@@ -40,6 +46,7 @@ def segmented_regression(
         time.tolist(),
         position.tolist(),
         n_breakpoints=n_breakpoints,
+        start_values=start_values,
         n_boot=10,
     )
 
@@ -61,9 +68,12 @@ def segmented_regression(
         slope_est = results["estimates"][alpha_key]["estimate"]
         all_slopes.append(float(slope_est))
 
-    # all_slopes = [plateau_high, fast_slope, slow_slope, plateau_low]
-    # Keep only the two closing slopes for reporting (consistent with other methods)
-    slopes = all_slopes[1:3]
+    # Pick the two segments with the largest absolute slope for reporting.
+    # For the gate (3 bps): plateau, fast, slow, plateau → indices 1, 2.
+    # For the trapezoid (4 bps): flat, rise, plateau, decrease, flat → indices 1, 3.
+    indexed = sorted(enumerate(all_slopes), key=lambda x: abs(x[1]), reverse=True)
+    top2_idx = sorted(i for i, _ in indexed[:2])
+    slopes = [all_slopes[i] for i in top2_idx]
 
     print("=== Method 1: Segmented Regression (Muggeo) ===")
     print(f"Breakpoints: {[f'{bp:.3f}' for bp in breakpoints]}")
@@ -103,9 +113,25 @@ def analyze(
     time = data.time
     results: dict[str, dict[str, Any]] = {}
     segments: dict[str, Any] = {}
-    for col in data.gate_columns:
+    for g_idx, col in enumerate(data.gate_columns):
         position = data.df[col].to_numpy()
-        r = segmented_regression(time, position)
+        is_trapezoid = g_idx == 1 and data.trapezoid_decrease_rate is not None
+        if is_trapezoid:
+            # Provide initial guesses: rise_start, rise_end, decrease_start, zero_crossing.
+            # Muggeo's algorithm diverges on the steep rise (~100 %/s) without them.
+            t_lo, t_hi = float(time[0]), float(time[-1])
+            t_range = t_hi - t_lo
+            start_values = [
+                t_lo + 0.10 * t_range,
+                t_lo + 0.15 * t_range,
+                t_lo + 0.25 * t_range,
+                t_lo + 0.75 * t_range,
+            ]
+            r = segmented_regression(
+                time, position, n_breakpoints=4, start_values=start_values
+            )
+        else:
+            r = segmented_regression(time, position, n_breakpoints=3)
         results[col] = r
         segments[col] = _build_segments(data, r)
     return results, segments
