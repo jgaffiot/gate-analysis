@@ -54,7 +54,7 @@ def generate_synthetic_data(
     t_start_closing: float = 2.0,
     t_slope_change: float = 5.0,
     t_end_closing: float = 9.0,
-    t_total: float = 15.0,
+    t_total: float = 20.0,
     slope_fast: float = -25.0,
     slope_slow: float = -5.0,
     noise_std: float = 1.0,

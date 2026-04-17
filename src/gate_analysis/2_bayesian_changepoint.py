@@ -225,10 +225,139 @@ def bayesian_changepoint(
     }
 
 
+def bayesian_changepoint_trapezoid(
+    time: npt.NDArray[np.floating[Any]],
+    position: npt.NDArray[np.floating[Any]],
+) -> dict[str, Any]:
+    """Fit a Bayesian trapezoid change-point model via MAP + Laplace approximation.
+
+    Probabilistic model
+    -------------------
+    tau1            ~ Uniform(t_min, t_max)
+    d12             ~ HalfNormal(sigma=3)     → tau2 = tau1 + d12 (decrease start)
+    log_rise_rate   ~ Normal(log(100), 0.5)   → rise_rate = exp(log_rise_rate)
+    log_dec_rate    ~ Normal(log(10), 1.0)    → dec_rate  = exp(log_dec_rate)
+    sigma_obs       ~ HalfNormal(5)
+
+    The internal parameter vector is
+        [tau1, d12, log_rise_rate, log_dec_rate, log_sigma]
+
+    Returns breakpoints [tau1, t_rise_end, tau2] and slopes [rise_rate, -dec_rate].
+    """
+    n = len(time)
+    t_min, t_max = float(time.min()), float(time.max())
+    t_range = t_max - t_min
+
+    def neg_log_posterior(params: npt.NDArray[np.floating[Any]]) -> float:
+        tau1, d12, log_rise_rate, log_dec_rate, log_sigma = params
+        if d12 <= 0.0:
+            return 1e15
+        tau2 = tau1 + d12
+        rise_rate = np.exp(log_rise_rate)
+        dec_rate = np.exp(log_dec_rate)
+        sigma = np.exp(log_sigma)
+
+        t_rise_end = tau1 + 100.0 / rise_rate
+        rise = rise_rate * (time - tau1)
+        decrease = np.maximum(0.0, 100.0 - dec_rate * (time - tau2))
+        mu = np.where(
+            time < tau1,
+            0.0,
+            np.where(time < t_rise_end, rise, np.where(time < tau2, 100.0, decrease)),
+        )
+
+        nll = 0.5 * np.sum(((position - mu) / sigma) ** 2) + n * log_sigma
+
+        nlp = (
+            0.5 * (d12 / 3.0) ** 2
+            + 0.5 * ((log_rise_rate - np.log(100.0)) / 0.5) ** 2
+            + 0.5 * ((log_dec_rate - np.log(10.0)) / 1.0) ** 2
+            + 0.5 * (sigma / 5.0) ** 2
+        )
+        return nll + nlp
+
+    x0 = np.array(
+        [
+            t_min + 0.15 * t_range,  # tau1
+            0.25 * t_range,  # d12
+            np.log(100.0),  # log_rise_rate
+            np.log(10.0),  # log_dec_rate
+            0.0,  # log_sigma → sigma=1
+        ]
+    )
+
+    result = minimize(
+        neg_log_posterior,
+        x0,
+        method="Powell",
+        options={"xtol": 1e-6, "ftol": 1e-6, "maxiter": 100_000},
+    )
+
+    tau1, d12, log_rise_rate, log_dec_rate, log_sigma = result.x
+    tau2 = tau1 + d12
+    rise_rate = np.exp(log_rise_rate)
+    dec_rate = np.exp(log_dec_rate)
+    t_rise_end = tau1 + 100.0 / rise_rate
+    sigma_noise = np.exp(log_sigma)
+
+    hess = _numerical_hessian(neg_log_posterior, result.x)
+    try:
+        cov = np.linalg.inv(hess)
+    except np.linalg.LinAlgError:
+        cov = np.full((5, 5), np.nan)
+
+    se = np.sqrt(np.maximum(np.diag(cov), 0.0))
+
+    # Delta method: se(rise_rate) = se(log_rise_rate) * rise_rate
+    se_rise_rate = float(se[2]) * rise_rate
+    se_dec_rate = float(se[3]) * dec_rate
+    # tau2 = tau1 + d12 → var(tau2) = var(tau1) + var(d12) + 2*cov(tau1,d12)
+    se_tau2 = float(np.sqrt(max(0.0, cov[0, 0] + cov[1, 1] + 2.0 * cov[0, 1])))
+
+    print("=== Method 2: Bayesian Trapezoid MAP + Laplace (scipy) ===")
+    print(f"Rise start: tau1={tau1:.3f} ± {se[0]:.3f} s")
+    print(f"Rise end:   {t_rise_end:.3f} s")
+    print(f"Decrease start: tau2={tau2:.3f} ± {se_tau2:.3f} s")
+    print(
+        f"Rise rate:  {rise_rate:.2f} ± {se_rise_rate:.2f} %/s"
+        f"  →  95 % CI: [{rise_rate - 1.96 * se_rise_rate:.2f}, {rise_rate + 1.96 * se_rise_rate:.2f}]"
+    )
+    print(
+        f"Dec rate:   {dec_rate:.2f} ± {se_dec_rate:.2f} %/s"
+        f"  →  95 % CI: [{dec_rate - 1.96 * se_dec_rate:.2f}, {dec_rate + 1.96 * se_dec_rate:.2f}]"
+    )
+    print(f"Noise σ: {sigma_noise:.2f} %")
+
+    return {
+        "breakpoints": [tau1, t_rise_end, tau2],
+        "slopes": [rise_rate, -dec_rate],
+        "slope_stderr": [se_rise_rate, se_dec_rate],
+        "tau_stderr": [float(se[0]), float(np.nan), se_tau2],
+        "cov": cov,
+        "model": "trapezoid",
+    }
+
+
 def _build_segments(
     data: GateData, result: dict[str, Any]
 ) -> list[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]]:
     """Build fitted line segments for plotting."""
+    if result.get("model") == "trapezoid":
+        t1, t_rise_end, t2 = result["breakpoints"]
+        rise_rate, neg_dec_rate = result["slopes"]
+        dec_rate = -neg_dec_rate
+        segments = []
+        for t_lo, t_hi, fn in [
+            (data.time[0], t1, lambda t: np.zeros_like(t)),
+            (t1, t_rise_end, lambda t: rise_rate * (t - t1)),
+            (t_rise_end, t2, lambda t: np.full_like(t, 100.0)),
+            (t2, data.time[-1], lambda t: np.maximum(0.0, 100.0 - dec_rate * (t - t2))),
+        ]:
+            mask = (data.time >= t_lo) & (data.time <= t_hi)
+            t_seg = data.time[mask]
+            segments.append((t_seg, fn(t_seg)))
+        return segments
+
     tau1, tau2, tau3 = result["breakpoints"]
     s_fast, s_slow = result["slopes"]
     level_high, level_low = result["plateaus"]
@@ -254,14 +383,22 @@ def analyze(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Run Bayesian changepoint analysis on all gate columns.
 
+    Dispatches to the trapezoid model for ``gate_1`` when
+    ``data.trapezoid_decrease_rate`` is set.
+
     Returns (results, segments) dicts keyed by gate column name.
     """
     time = data.time
     results: dict[str, dict[str, Any]] = {}
     segments: dict[str, Any] = {}
-    for col in data.gate_columns:
+    for g_idx, col in enumerate(data.gate_columns):
         position = data.df[col].to_numpy()
-        r = bayesian_changepoint(time, position)
+        is_trapezoid = g_idx == 1 and data.trapezoid_decrease_rate is not None
+        r = (
+            bayesian_changepoint_trapezoid(time, position)
+            if is_trapezoid
+            else bayesian_changepoint(time, position)
+        )
         results[col] = r
         segments[col] = _build_segments(data, r)
     return results, segments
